@@ -5,21 +5,19 @@ services:
     container_name: nitka-ssh-tun-server
     build:
       context: ./ssh_tun_server
-      args:
-        vpn_username: {{ ssh_tun_ssh_username }}
-        public_ed25519_key: "{{ ssh_tun_ssh_public_key }}"
-        network_vpn_gateway_ipv4: {{ ssh_tun_network_vpn_gateway_ipv4 }}
-        network_vpn_gateway_cidr_ipv4: {{ ssh_tun_network_vpn_gateway_cidr_ipv4 }}
-        network_vpn_subnet_cidr_ipv4: {{ ssh_tun_network_vpn_subnet_cidr_ipv4 }}
-        network_container_vpn_ipv4: {{ ssh_tun_network_container_vpn_ipv4 }}
-        network_vpn_interface: {{ ssh_tun_network_interface }}
     image: local/ssh-tun-server:latest
+    env_file:
+      - ./ssh_tun_server/security.env
     cap_add:
       - NET_ADMIN
       - NET_RAW
       - SYS_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./ssh_tun_server/authorized_keys:/run/nitka/authorized_keys:ro
+      - ./ssh_tun_server/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key:ro
+      - ./ssh_tun_server/ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "/usr/local/bin/healthcheck"]
@@ -44,6 +42,9 @@ services:
       ssh_tun_server:
         condition: service_healthy
     network_mode: "service:ssh_tun_server"
+    volumes:
+      - ./dns/unbound.conf:/etc/unbound/unbound.conf:ro
+      - ./dns/unbound.conf.d:/etc/unbound/unbound.conf.d:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "/usr/local/bin/healthcheck"]

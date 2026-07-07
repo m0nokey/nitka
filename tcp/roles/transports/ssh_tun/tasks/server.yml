@@ -15,9 +15,44 @@
     ssh_tun_ssh_public_key: "{{ lookup('file', ssh_tun_ssh_key_dir ~ '/id_ed25519.pub') | trim }}"
   changed_when: false
 
+- name: Render SSH TUN server environment
+  ansible.builtin.template:
+    src: server/security.env.j2
+    dest: "{{ egress_remote_dir }}/ssh_tun_server/security.env"
+    mode: "0600"
+  notify: restart egress stack
+
+- name: Render SSH TUN authorized keys
+  ansible.builtin.copy:
+    dest: "{{ egress_remote_dir }}/ssh_tun_server/authorized_keys"
+    mode: "0600"
+    content: "{{ ssh_tun_ssh_public_key }}\n"
+  notify: restart egress stack
+
+- name: Copy SSH TUN server host keypair to server endpoint
+  ansible.builtin.copy:
+    src: "{{ ssh_tun_ssh_key_dir }}/{{ item.src }}"
+    dest: "{{ egress_remote_dir }}/ssh_tun_server/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: 'ssh_host_ed25519_key', dest: 'ssh_host_ed25519_key', mode: '0600' }
+    - { src: 'ssh_host_ed25519_key.pub', dest: 'ssh_host_ed25519_key.pub', mode: '0644' }
+  notify: restart egress stack
+
 - name: Render SSH TUN server Dockerfile
   ansible.builtin.template:
     src: server/Dockerfile.j2
     dest: "{{ egress_remote_dir }}/ssh_tun_server/Dockerfile"
     mode: "0644"
+  notify: restart egress stack
+
+- name: Render SSH TUN server dockerignore
+  ansible.builtin.copy:
+    dest: "{{ egress_remote_dir }}/ssh_tun_server/.dockerignore"
+    mode: "0644"
+    content: |
+      *
+      !Dockerfile
   notify: restart egress stack
