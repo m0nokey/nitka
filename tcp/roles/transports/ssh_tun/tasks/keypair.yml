@@ -1,0 +1,32 @@
+---
+- name: Prepare local SSH TUN key directory
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ ssh_tun_ssh_key_dir }}"
+    state: directory
+    mode: "0700"
+  changed_when: false
+
+- name: Generate SSH TUN keypair on first run
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N '' -f {{ ssh_tun_ssh_key_dir }}/id_ed25519
+      -C nitka-ssh-tun
+    creates: "{{ ssh_tun_ssh_key_dir }}/id_ed25519"
+
+- name: Set SSH TUN private key permissions
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ ssh_tun_ssh_key_dir }}/id_ed25519"
+    mode: "0600"
+
+- name: Set SSH TUN public key permissions
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ ssh_tun_ssh_key_dir }}/id_ed25519.pub"
+    mode: "0644"

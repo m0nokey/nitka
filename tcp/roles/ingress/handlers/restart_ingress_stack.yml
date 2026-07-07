@@ -1,0 +1,40 @@
+---
+- name: Run ingress stack ensure script from handler
+  become: true
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/ingress_stack_ensure
+    chdir: "{{ ingress_remote_dir }}"
+  register: ingress_handler_run
+  ignore_errors: true
+  ignore_unreachable: true
+
+- name: Clear ingress host error after handler SSH interruption
+  ansible.builtin.meta: clear_host_errors
+  when: ingress_handler_run.unreachable | default(false)
+
+- name: Wait for ingress SSH after handler interruption
+  ansible.builtin.wait_for_connection:
+    timeout: 180
+    delay: 5
+    sleep: 5
+  when: ingress_handler_run.unreachable | default(false)
+
+- name: Reset ingress SSH connection after handler interruption
+  ansible.builtin.meta: reset_connection
+  when: ingress_handler_run.unreachable | default(false)
+
+- name: Retry ingress stack ensure script from handler after SSH interruption
+  become: true
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/ingress_stack_ensure
+    chdir: "{{ ingress_remote_dir }}"
+  when: ingress_handler_run.unreachable | default(false)
+
+- name: Fail if ingress handler ensure script failed
+  ansible.builtin.fail:
+    msg: >-
+      ingress handler ensure failed with rc={{ ingress_handler_run.rc | default('unknown') }}:
+      {{ ingress_handler_run.stderr | default(ingress_handler_run.msg | default('no stderr')) }}
+  when:
+    - not (ingress_handler_run.unreachable | default(false))
+    - ingress_handler_run.rc | default(0) != 0

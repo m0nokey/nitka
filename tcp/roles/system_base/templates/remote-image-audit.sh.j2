@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+cd "{{ audit_remote_dir }}"
+images="$(
+    docker compose config --images 2>/dev/null || true
+    docker ps --format '{% raw %}{{.Image}}{% endraw %}' 2>/dev/null || true
+)"
+images="$(printf '%s\n' "$images" | awk 'NF && !seen[$0]++')"
+
+if [ -z "$images" ]; then
+    echo "No images found for audit in {{ audit_remote_dir }}" >&2
+    exit 1
+fi
+
+status=0
+for image in $images; do
+    echo
+    echo "===== trivy audit: $image ====="
+    if ! docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v trivy-cache:/root/.cache/ \
+            aquasec/trivy:latest image \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            "$image"; then
+        status=1
+    fi
+done
+
+docker rmi aquasec/trivy:latest >/dev/null 2>&1 || true
+docker volume rm trivy-cache >/dev/null 2>&1 || true
+exit "$status"

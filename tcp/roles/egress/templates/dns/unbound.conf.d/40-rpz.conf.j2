@@ -1,0 +1,12 @@
+server:
+    module-config: "respip validator iterator"
+
+{% for source in egress_unbound_rpz_sources %}
+rpz:
+    name: "{{ source.name }}"
+    url: "{{ source.url }}"
+    zonefile: "{{ source.zonefile }}"
+    rpz-action-override: nxdomain
+    rpz-log: no
+
+{% endfor %}

@@ -1,0 +1,41 @@
+---
+egress_remote_dir: /opt/nitka-egress
+ssh_tun_ssh_key_dir: "{{ playbook_dir }}/.generated/egress/ssh"
+ssh_tun_ssh_username: vpnuser
+ssh_tun_ssh_port: 22
+ssh_tun_public_host: 198.51.100.20
+ssh_tun_network_container_subnet_cidr_ipv4: 172.29.113.0/24
+ssh_tun_network_vpn_subnet_cidr_ipv4: 10.11.12.0/30
+ssh_tun_network_interface: tun10
+ssh_tun_device_number: 10
+ssh_tun_network_container_gateway_ipv4: 172.29.113.1
+ssh_tun_network_container_vpn_ipv4: 172.29.113.2
+ssh_tun_network_vpn_gateway_ipv4: 10.11.12.1
+ssh_tun_network_vpn_gateway_cidr_ipv4: 10.11.12.1/30
+
+system_base_docker_updater_calendar: "*-*-* 02:00"
+system_base_docker_updater_services:
+  - service: ssh_tun_server
+    container: nitka-ssh-tun-server
+    image_type: build
+    base_image: alpine:3.23
+    cascade_restart:
+      - unbound
+  - service: unbound
+    container: nitka-unbound
+    image_type: build
+    base_image: alpine:3.23
+
+egress_unbound_forward_servers:
+  - address: 1.1.1.1
+    tls_name: cloudflare-dns.com
+  - address: 9.9.9.9
+    tls_name: dns.quad9.net
+
+egress_unbound_rpz_sources:
+  - name: example-blocklist
+    url: https://example.com/rpz/example.txt
+    zonefile: /var/lib/unbound/rpz/example-blocklist.rpz
+
+harden_ssh_initial_user: egress
+harden_ssh_port: 22

@@ -1,0 +1,11 @@
+---
+all:
+  children:
+    egress:
+      hosts:
+        egress_node:
+          ansible_host: "198.51.100.20"
+          ansible_port: "22"
+          ansible_user: "egress"
+          ansible_ssh_private_key_file: "{{ playbook_dir }}/.generated/management/egress/id_ed25519"
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o ConnectTimeout=8 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2'

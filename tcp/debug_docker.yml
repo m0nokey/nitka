@@ -1,0 +1,75 @@
+---
+- name: Debug egress Docker stack
+  hosts: egress
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Collect egress Docker state
+      ansible.builtin.raw: |
+        set -eu
+        cd /opt/nitka-egress 2>/dev/null || cd /opt/egress 2>/dev/null || cd /opt/server_egress 2>/dev/null || true
+        echo "===== pwd/files ====="
+        pwd || true
+        ls -la || true
+        find . -maxdepth 3 -type f -printf '%M %u %g %s %p\n' 2>/dev/null | sort || true
+        echo "===== docker version ====="
+        docker version 2>&1 || true
+        docker compose version 2>&1 || true
+        echo "===== compose config ====="
+        test -f docker-compose.yml && docker compose config 2>&1 || true
+        echo "===== compose ps ====="
+        test -f docker-compose.yml && docker compose ps -a 2>&1 || true
+        echo "===== docker ps ====="
+        docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' 2>&1 || true
+        echo "===== health ====="
+        for c in nitka-ssh-tun-server nitka-unbound ssh_tun_server unbound; do
+          docker inspect -f "$c running={% raw %}{{.State.Running}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} exit={{.State.ExitCode}}{% endraw %}" "$c" 2>/dev/null || true
+        done
+        echo "===== compose logs ====="
+        test -f docker-compose.yml && docker compose logs --tail=160 2>&1 || true
+      register: debug_docker_egress
+      changed_when: false
+      failed_when: false
+
+    - name: Print egress Docker state
+      ansible.builtin.debug:
+        var: debug_docker_egress.stdout_lines
+
+- name: Debug ingress Docker stack
+  hosts: ingress
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Collect ingress Docker state
+      ansible.builtin.raw: |
+        set -eu
+        cd /opt/nitka-ingress 2>/dev/null || cd /opt/ingress 2>/dev/null || cd /opt/server_inside 2>/dev/null || true
+        echo "===== pwd/files ====="
+        pwd || true
+        ls -la || true
+        find . -maxdepth 3 -type f -printf '%M %u %g %s %p\n' 2>/dev/null | sort || true
+        echo "===== docker version ====="
+        docker version 2>&1 || true
+        docker compose version 2>&1 || true
+        echo "===== compose config ====="
+        test -f docker-compose.yml && docker compose config 2>&1 || true
+        echo "===== compose ps ====="
+        test -f docker-compose.yml && docker compose ps -a 2>&1 || true
+        echo "===== docker ps ====="
+        docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' 2>&1 || true
+        echo "===== health ====="
+        for c in nitka-ssh-tun-client nitka-clashrs nitka-xray ssh_tun_client clashrs xray; do
+          docker inspect -f "$c running={% raw %}{{.State.Running}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} exit={{.State.ExitCode}}{% endraw %}" "$c" 2>/dev/null || true
+        done
+        echo "===== compose logs ====="
+        test -f docker-compose.yml && docker compose logs --tail=200 2>&1 || true
+        echo "===== watchdog ====="
+        systemctl status ingress-watchdog.timer ingress-watchdog.service --no-pager -l 2>/dev/null || true
+        journalctl -u ingress-watchdog.service --since '30 minutes ago' --no-pager -n 120 2>/dev/null || true
+      register: debug_docker_ingress
+      changed_when: false
+      failed_when: false
+
+    - name: Print ingress Docker state
+      ansible.builtin.debug:
+        var: debug_docker_ingress.stdout_lines

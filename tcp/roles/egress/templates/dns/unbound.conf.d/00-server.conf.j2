@@ -1,0 +1,52 @@
+server:
+    interface: {{ ssh_tun_network_vpn_gateway_ipv4 }}
+    access-control: {{ ssh_tun_network_vpn_gateway_cidr_ipv4 }} allow
+    access-control: {{ ssh_tun_network_container_subnet_cidr_ipv4 }} allow
+    access-control: 0.0.0.0/0 refuse
+    directory: "/etc/unbound"
+    do-daemonize: no
+    username: unbound
+    pidfile: "/tmp/unbound.pid"
+    hide-identity: yes
+    hide-version: yes
+    identity: ""
+    version: ""
+    qname-minimisation: yes
+    qname-minimisation-strict: yes
+    prefetch: yes
+    prefetch-key: yes
+    harden-glue: yes
+    harden-short-bufsize: yes
+    harden-algo-downgrade: yes
+    harden-dnssec-stripped: yes
+    harden-below-nxdomain: yes
+    harden-referral-path: yes
+    val-clean-additional: yes
+    use-caps-for-id: yes
+    deny-any: yes
+    minimal-responses: yes
+    aggressive-nsec: yes
+    edns-buffer-size: 1232
+    max-udp-size: 1232
+    do-not-query-localhost: yes
+    do-ip6: no
+    do-tcp: yes
+    tcp-upstream: yes
+    use-syslog: no
+    tls-cert-bundle: "/etc/ssl/certs/ca-certificates.crt"
+    auto-trust-anchor-file: "/var/lib/unbound/root.key"
+    private-address: 10.0.0.0/8
+    private-address: 172.16.0.0/12
+    private-address: 192.168.0.0/16
+    private-address: 169.254.0.0/16
+    private-address: 100.64.0.0/10
+    num-threads: 1
+    so-reuseport: no
+    msg-cache-size: 32m
+    rrset-cache-size: 64m
+    infra-cache-numhosts: 20000
+    cache-min-ttl: 0
+    cache-max-ttl: 21600
+    cache-max-negative-ttl: 900
+    serve-expired: no
+    module-config: "respip validator iterator"

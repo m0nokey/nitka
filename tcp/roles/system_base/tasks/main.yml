@@ -1,0 +1,251 @@
+---
+- name: Gather package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Set Debian codename
+  ansible.builtin.set_fact:
+    system_base_debian_codename: "{{ ansible_facts.distribution_release }}"
+
+- name: Configure Debian apt sources
+  ansible.builtin.template:
+    src: debian.sources.j2
+    dest: /etc/apt/sources.list.d/debian.sources
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - system_base_manage_debian_repo | bool
+    - ansible_facts.os_family == "Debian"
+  register: system_base_debian_sources
+
+- name: Check legacy apt sources.list
+  ansible.builtin.stat:
+    path: /etc/apt/sources.list
+  when:
+    - system_base_manage_debian_repo | bool
+    - ansible_facts.os_family == "Debian"
+  register: system_base_legacy_sources_list
+
+- name: Remove legacy apt sources.list
+  ansible.builtin.file:
+    path: /etc/apt/sources.list
+    state: absent
+  when:
+    - system_base_manage_debian_repo | bool
+    - ansible_facts.os_family == "Debian"
+    - system_base_legacy_sources_list.stat.exists | default(false)
+  register: system_base_legacy_sources_removed
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  when:
+    - ansible_facts.os_family == "Debian"
+    - system_base_debian_sources.changed | default(false) or system_base_legacy_sources_removed.changed | default(false)
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ system_base_required_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 86400
+  when: ansible_facts.os_family == "Debian"
+
+- name: Configure timezone
+  ansible.builtin.command:
+    cmd: "timedatectl set-timezone {{ system_base_timezone }}"
+  changed_when: false
+  when: ansible_facts.service_mgr == "systemd"
+
+- name: Create apt keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: ansible_facts.os_family == "Debian"
+
+- name: Install Docker apt key
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -fsSL --proto '=https' --tlsv1.3 https://download.docker.com/linux/debian/gpg \
+      | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod 0644 /etc/apt/keyrings/docker.gpg
+  args:
+    executable: /bin/bash
+    creates: /etc/apt/keyrings/docker.gpg
+  when: ansible_facts.os_family == "Debian"
+
+- name: Configure Docker apt source
+  ansible.builtin.template:
+    src: docker.sources.j2
+    dest: /etc/apt/sources.list.d/docker.sources
+    owner: root
+    group: root
+    mode: "0644"
+  when: ansible_facts.os_family == "Debian"
+  register: system_base_docker_sources
+
+- name: Configure Docker apt pin
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/docker
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Package: *
+      Pin: origin download.docker.com
+      Pin-Priority: 900
+  when: ansible_facts.os_family == "Debian"
+
+- name: Update apt cache after Docker source changes
+  ansible.builtin.apt:
+    update_cache: true
+  when:
+    - ansible_facts.os_family == "Debian"
+    - system_base_docker_sources.changed or (system_base_debian_sources.changed | default(false))
+
+- name: Install Docker and Compose plugin
+  ansible.builtin.apt:
+    name: "{{ system_base_docker_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 86400
+  when: ansible_facts.os_family == "Debian"
+
+- name: Enable Docker service
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Install unattended upgrade packages
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 86400
+  when:
+    - ansible_facts.os_family == "Debian"
+    - system_base_enable_os_updater | bool
+
+- name: Configure unattended upgrades
+  ansible.builtin.template:
+    src: 50unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+  when: system_base_enable_os_updater | bool
+
+- name: Configure apt periodic upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+      APT::Periodic::Unattended-Upgrade "1";
+  when: system_base_enable_os_updater | bool
+
+- name: Install OS updater script
+  ansible.builtin.template:
+    src: os-updater.j2
+    dest: /usr/local/sbin/os-updater
+    owner: root
+    group: root
+    mode: "0755"
+  when: system_base_enable_os_updater | bool
+
+- name: Install OS updater service
+  ansible.builtin.template:
+    src: os-updater.service.j2
+    dest: /etc/systemd/system/os-updater.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: system_base_enable_os_updater | bool
+  register: system_base_os_updater_service
+
+- name: Install OS updater timer
+  ansible.builtin.template:
+    src: os-updater.timer.j2
+    dest: /etc/systemd/system/os-updater.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when: system_base_enable_os_updater | bool
+  register: system_base_os_updater_timer
+
+- name: Remove legacy OS updater logrotate configs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/logrotate.d/os_updater
+    - /etc/logrotate.d/apt-auto-upgrade
+  when: system_base_enable_os_updater | bool
+
+- name: Install OS updater logrotate config
+  ansible.builtin.template:
+    src: os-updater.logrotate.j2
+    dest: /etc/logrotate.d/os-updater
+    owner: root
+    group: root
+    mode: "0644"
+  when: system_base_enable_os_updater | bool
+
+- name: Enable OS updater timer
+  ansible.builtin.systemd_service:
+    name: os-updater.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ system_base_os_updater_service.changed or system_base_os_updater_timer.changed }}"
+  when: system_base_enable_os_updater | bool
+
+- name: Install Docker project updater script
+  ansible.builtin.template:
+    src: docker-project-updater.j2
+    dest: "/usr/local/sbin/{{ system_base_docker_updater_name }}-docker-updater"
+    owner: root
+    group: root
+    mode: "0755"
+  when: system_base_enable_docker_updater | bool
+
+- name: Install Docker project updater service
+  ansible.builtin.template:
+    src: docker-project-updater.service.j2
+    dest: "/etc/systemd/system/{{ system_base_docker_updater_name }}-docker-updater.service"
+    owner: root
+    group: root
+    mode: "0644"
+  when: system_base_enable_docker_updater | bool
+  register: system_base_docker_updater_service
+
+- name: Install Docker project updater timer
+  ansible.builtin.template:
+    src: docker-project-updater.timer.j2
+    dest: "/etc/systemd/system/{{ system_base_docker_updater_name }}-docker-updater.timer"
+    owner: root
+    group: root
+    mode: "0644"
+  when: system_base_enable_docker_updater | bool
+  register: system_base_docker_updater_timer
+
+- name: Enable Docker project updater timer
+  ansible.builtin.systemd_service:
+    name: "{{ system_base_docker_updater_name }}-docker-updater.timer"
+    enabled: true
+    state: started
+    daemon_reload: "{{ system_base_docker_updater_service.changed or system_base_docker_updater_timer.changed }}"
+  when: system_base_enable_docker_updater | bool

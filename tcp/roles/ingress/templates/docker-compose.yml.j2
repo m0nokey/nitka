@@ -1,0 +1,80 @@
+name: nitka-ingress
+
+services:
+  ssh_tun_client:
+    container_name: nitka-ssh-tun-client
+    build:
+      context: ./ssh_tun_client
+    image: local/ssh-tun-client:latest
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "sh -ec 'test \"$(cat /proc/1/comm)\" = ssh && ip route show | grep -q \"^default via 10.11.12.1 dev {{ ssh_tun_network_interface }}\"'",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    volumes:
+      - ./ssh_tun_client:/ssh:ro
+    dns:
+      - 10.11.12.1
+    networks:
+      - nitka_ingress
+    logging:
+      driver: none
+
+  clashrs:
+    container_name: nitka-clashrs
+    image: local/clash-rs:latest
+    network_mode: "service:ssh_tun_client"
+    depends_on:
+      ssh_tun_client:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./clashrs/config.yaml:/etc/clash/config.yaml:ro
+    command: ["-d", "/etc/clash", "--compatibility"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "nc -z 127.0.0.1 {{ ingress_clash_port }}",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: none
+
+  xray:
+    container_name: nitka-xray
+    image: local/xray-core:auto
+    depends_on:
+      clashrs:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./xray/config.json:/etc/xray/config.json:ro
+    command: ["run", "-c", "/etc/xray/config.json"]
+    ports:
+      - "{{ ingress_xray_xhttp_port }}:{{ ingress_xray_xhttp_port }}"
+      - "{{ ingress_xray_reality_port }}:{{ ingress_xray_reality_port }}"
+    networks:
+      - nitka_ingress
+    logging:
+      driver: none
+
+networks:
+  nitka_ingress:
+    name: nitka_ingress
+    driver: bridge

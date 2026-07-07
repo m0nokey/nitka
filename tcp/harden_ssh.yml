@@ -1,0 +1,190 @@
+---
+- name: Detect controller SSH capabilities
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Detect controller SSH KEX algorithms
+      ansible.builtin.command:
+        cmd: ssh -Q kex
+      register: harden_ssh_controller_kex_cmd
+      changed_when: false
+
+- name: Harden ingress SSH
+  hosts: ingress
+  become: true
+  vars:
+    harden_ssh_node_user: ingress
+    harden_ssh_node_group: ingress-admin
+    harden_ssh_preferred_kex:
+      - mlkem768x25519-sha256
+      - sntrup761x25519-sha512
+      - sntrup761x25519-sha512@openssh.com
+  tasks:
+    - name: Detect initial user primary group
+      ansible.builtin.command:
+        cmd: "id -gn {{ harden_ssh_initial_user }}"
+      register: harden_ssh_initial_group_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Build SSH AllowGroups
+      ansible.builtin.set_fact:
+        harden_ssh_allow_groups: >-
+          {{
+            harden_ssh_node_group
+            ~ (
+              (' ' ~ harden_ssh_initial_group_cmd.stdout)
+              if harden_ssh_initial_user != 'root'
+                 and (harden_ssh_initial_group_cmd.stdout | default('') | length > 0)
+                 and harden_ssh_initial_group_cmd.stdout != harden_ssh_node_group
+              else ''
+            )
+          }}
+
+    - name: Detect supported SSH KEX algorithms
+      ansible.builtin.command:
+        cmd: ssh -Q kex
+      register: harden_ssh_kex_cmd
+      changed_when: false
+
+    - name: Set safe SSH KEX list
+      ansible.builtin.set_fact:
+        harden_ssh_kex_algorithms: >-
+          {{
+            harden_ssh_preferred_kex
+            | select('in', harden_ssh_kex_cmd.stdout_lines)
+            | select('in', hostvars['localhost'].harden_ssh_controller_kex_cmd.stdout_lines)
+            | join(',')
+          }}
+
+    - name: Refuse SSH hardening without a shared safe KEX
+      ansible.builtin.fail:
+        msg: "No shared safe SSH KEX between controller and ingress server."
+      when: harden_ssh_kex_algorithms | length == 0
+
+    - name: Backup current sshd_config
+      ansible.builtin.copy:
+        src: /etc/ssh/sshd_config
+        dest: "/etc/ssh/sshd_config.nitka.bak"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install hardened sshd_config
+      ansible.builtin.template:
+        src: sshd_config.j2
+        dest: /etc/ssh/sshd_config
+        owner: root
+        group: root
+        mode: "0644"
+        validate: "sshd -t -f %s"
+
+    - name: Start emergency SSH rollback timer
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemd-run \
+          --unit=nitka-ssh-rollback \
+          --on-active=2min \
+          /bin/bash -lc 'cp -a /etc/ssh/sshd_config.nitka.bak /etc/ssh/sshd_config && (systemctl reload ssh || systemctl reload sshd)'
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Reload SSH daemon
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemctl reload ssh || systemctl reload sshd
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Harden egress SSH
+  hosts: egress
+  become: true
+  vars:
+    harden_ssh_node_user: egress
+    harden_ssh_node_group: egress-admin
+    harden_ssh_preferred_kex:
+      - mlkem768x25519-sha256
+      - sntrup761x25519-sha512
+      - sntrup761x25519-sha512@openssh.com
+  tasks:
+    - name: Detect initial user primary group
+      ansible.builtin.command:
+        cmd: "id -gn {{ harden_ssh_initial_user }}"
+      register: harden_ssh_initial_group_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Build SSH AllowGroups
+      ansible.builtin.set_fact:
+        harden_ssh_allow_groups: >-
+          {{
+            harden_ssh_node_group
+            ~ (
+              (' ' ~ harden_ssh_initial_group_cmd.stdout)
+              if harden_ssh_initial_user != 'root'
+                 and (harden_ssh_initial_group_cmd.stdout | default('') | length > 0)
+                 and harden_ssh_initial_group_cmd.stdout != harden_ssh_node_group
+              else ''
+            )
+          }}
+
+    - name: Detect supported SSH KEX algorithms
+      ansible.builtin.command:
+        cmd: ssh -Q kex
+      register: harden_ssh_kex_cmd
+      changed_when: false
+
+    - name: Set safe SSH KEX list
+      ansible.builtin.set_fact:
+        harden_ssh_kex_algorithms: >-
+          {{
+            harden_ssh_preferred_kex
+            | select('in', harden_ssh_kex_cmd.stdout_lines)
+            | select('in', hostvars['localhost'].harden_ssh_controller_kex_cmd.stdout_lines)
+            | join(',')
+          }}
+
+    - name: Refuse SSH hardening without a shared safe KEX
+      ansible.builtin.fail:
+        msg: "No shared safe SSH KEX between controller and egress server."
+      when: harden_ssh_kex_algorithms | length == 0
+
+    - name: Backup current sshd_config
+      ansible.builtin.copy:
+        src: /etc/ssh/sshd_config
+        dest: "/etc/ssh/sshd_config.nitka.bak"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install hardened sshd_config
+      ansible.builtin.template:
+        src: sshd_config.j2
+        dest: /etc/ssh/sshd_config
+        owner: root
+        group: root
+        mode: "0644"
+        validate: "sshd -t -f %s"
+
+    - name: Start emergency SSH rollback timer
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemd-run \
+          --unit=nitka-ssh-rollback \
+          --on-active=2min \
+          /bin/bash -lc 'cp -a /etc/ssh/sshd_config.nitka.bak /etc/ssh/sshd_config && (systemctl reload ssh || systemctl reload sshd)'
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Reload SSH daemon
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemctl reload ssh || systemctl reload sshd
+      args:
+        executable: /bin/bash
+      changed_when: false

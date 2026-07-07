@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+network_vpn_interface={{ ssh_tun_network_interface }}
+network_vpn_server_ipv4={{ ssh_tun_public_host }}
+network_vpn_gateway_ipv4=10.11.12.1
+network_vpn_client_cidr_ipv4=10.11.12.2/30
+network_vpn_mtu={{ ssh_tun_client_tun_mtu }}
+
+configure_dns() {
+    cat > /etc/resolv.conf <<RESOLV
+nameserver ${network_vpn_gateway_ipv4}
+options timeout:1 attempts:2 ndots:0
+RESOLV
+}
+
+detect_host_route() {
+    network_host_gateway_interface="$(ip route get "$network_vpn_server_ipv4" 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "dev") {print $(i+1); exit}}')"
+    network_host_gateway_ipv4="$(ip route get "$network_vpn_server_ipv4" 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "via") {print $(i+1); exit}}')"
+
+    if [ -z "${network_host_gateway_interface:-}" ] || [ -z "${network_host_gateway_ipv4:-}" ]; then
+        network_host_gateway_interface="$(ip -br addr | awk '$1 !~ /^(lo|tun|docker|veth|vir)/ && $2 ~ /UP/ {print $1; exit}')"
+        if [ -n "${network_host_gateway_interface:-}" ]; then
+            network_host_gateway_ipv4="$(ip route | awk -v dev="$network_host_gateway_interface" '$0 ~ dev && $1 != "default" {print $1; exit}' | sed 's#\.[0-9]\+/.*#.1#')"
+        fi
+    fi
+
+    [ -n "${network_host_gateway_interface:-}" ] && [ -n "${network_host_gateway_ipv4:-}" ]
+}
+
+setup_tun() {
+    detect_host_route || {
+        return 1
+    }
+
+    cleanup_tun
+    ip route replace "$network_vpn_server_ipv4" via "$network_host_gateway_ipv4" dev "$network_host_gateway_interface"
+    ip tuntap add mode tun user root name "$network_vpn_interface" >/dev/null 2>&1 || true
+    ip addr flush dev "$network_vpn_interface" >/dev/null 2>&1 || true
+    ip addr add "$network_vpn_client_cidr_ipv4" peer "$network_vpn_gateway_ipv4" dev "$network_vpn_interface"
+    ip link set dev "$network_vpn_interface" up mtu "$network_vpn_mtu"
+    ip route del default >/dev/null 2>&1 || true
+    ip route add default via "$network_vpn_gateway_ipv4" dev "$network_vpn_interface" metric 50
+    configure_dns
+}
+
+cleanup_tun() {
+    ip route del default >/dev/null 2>&1 || true
+    ip addr flush dev "$network_vpn_interface" >/dev/null 2>&1 || true
+    ip link set dev "$network_vpn_interface" down >/dev/null 2>&1 || true
+}
+
+setup_tun
+exec ssh -N -F /ssh/config proxy

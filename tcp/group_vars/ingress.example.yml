@@ -1,0 +1,47 @@
+---
+ingress_remote_dir: /opt/nitka-ingress
+ingress_local_dir: "{{ playbook_dir }}/.generated/ingress"
+ingress_state_dir: "{{ ingress_local_dir }}/state"
+ingress_xray_share_link_path: "{{ ingress_local_dir }}/share-links.txt"
+ssh_tun_ssh_key_dir: "{{ playbook_dir }}/.generated/egress/ssh"
+ssh_tun_ssh_private_key: "{{ ssh_tun_ssh_key_dir }}/id_ed25519"
+ssh_tun_ssh_public_key: "{{ ssh_tun_ssh_key_dir }}/id_ed25519.pub"
+ingress_xray_public_host: 203.0.113.10
+ingress_clash_port: 1080
+ingress_xray_xhttp_port_min: 20000
+ingress_xray_xhttp_port_max: 60000
+ingress_xray_xhttp_port: 35257
+ingress_xray_reality_port_min: 20000
+ingress_xray_reality_port_max: 60000
+ingress_xray_reality_port: 59049
+ingress_xray_obfs_host: example.com
+ingress_xray_obfs_path: /
+ingress_xray_xhttp_remarks: vless-xhttp-reality
+ingress_xray_reality_remarks: vless-reality-vision
+
+system_base_docker_updater_calendar: "*-*-* 02:20"
+system_base_docker_updater_services:
+  - service: ssh_tun_client
+    container: nitka-ssh-tun-client
+    image_type: build
+    base_image: alpine:3.23
+    cascade_restart:
+      - clashrs
+      - xray
+  - service: clashrs
+    container: nitka-clashrs
+    image_type: external
+    image: local/clash-rs:latest
+    release_repo: Watfaq/clash-rs
+    release_image_template: ghcr.io/watfaq/clash-rs:latest
+    cascade_restart:
+      - xray
+  - service: xray
+    container: nitka-xray
+    image_type: external
+    image: local/xray-core:auto
+    release_repo: XTLS/Xray-core
+    release_image_template: ghcr.io/xtls/xray-core:{tag_no_v}
+
+harden_ssh_initial_user: ingress
+harden_ssh_port: 22

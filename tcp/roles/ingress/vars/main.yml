@@ -1,0 +1,2 @@
+---
+ingress_clash_tcp_concurrent: true

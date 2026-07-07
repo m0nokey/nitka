@@ -1,0 +1,43 @@
+---
+- name: Debug SSH hardening state
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Collect SSH state
+      ansible.builtin.raw: |
+        set -eu
+        echo "===== hostname ====="
+        hostname || true
+        echo "===== whoami/id ====="
+        whoami || true
+        id || true
+        echo "===== sudo ====="
+        sudo -n true && echo "sudo_nopasswd=yes" || echo "sudo_nopasswd=no"
+        echo "===== sshd -T selected ====="
+        sudo -n sshd -T 2>/dev/null | grep -Ei '^(port|listenaddress|permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|authenticationmethods|allowgroups|allowusers|authorizedkeysfile|hostkeyalgorithms|ciphers|macs|kexalgorithms|subsystem|usepam|loglevel) ' || true
+        echo "===== ssh service ====="
+        sudo -n systemctl is-active ssh 2>/dev/null || true
+        sudo -n systemctl is-active sshd 2>/dev/null || true
+        sudo -n systemctl status ssh sshd --no-pager -l 2>/dev/null | tail -80 || true
+        echo "===== rollback ====="
+        sudo -n systemctl list-units 'nitka-ssh-rollback*' --all --no-pager 2>/dev/null || true
+        sudo -n systemctl list-timers 'nitka-ssh-rollback*' --all --no-pager 2>/dev/null || true
+        echo "===== users/groups ====="
+        getent passwd ingress egress root || true
+        getent group ingress-admin egress-admin sudo debian || true
+        id ingress 2>/dev/null || true
+        id egress 2>/dev/null || true
+        echo "===== ssh files ====="
+        sudo -n ls -ld /home/ingress /home/ingress/.ssh /home/ingress/.ssh/authorized_keys 2>/dev/null || true
+        sudo -n ls -ld /home/egress /home/egress/.ssh /home/egress/.ssh/authorized_keys 2>/dev/null || true
+        sudo -n sh -c 'test -f /home/ingress/.ssh/authorized_keys && wc -c /home/ingress/.ssh/authorized_keys && sed -n "1,3p" /home/ingress/.ssh/authorized_keys' 2>/dev/null || true
+        sudo -n sh -c 'test -f /home/egress/.ssh/authorized_keys && wc -c /home/egress/.ssh/authorized_keys && sed -n "1,3p" /home/egress/.ssh/authorized_keys' 2>/dev/null || true
+        echo "===== recent ssh logs ====="
+        sudo -n journalctl -u ssh -u sshd --since '20 minutes ago' --no-pager -n 120 2>/dev/null || true
+      register: debug_ssh_state
+      changed_when: false
+      failed_when: false
+
+    - name: Print SSH state
+      ansible.builtin.debug:
+        var: debug_ssh_state.stdout_lines

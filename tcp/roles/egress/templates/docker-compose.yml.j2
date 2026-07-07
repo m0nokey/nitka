@@ -1,0 +1,64 @@
+name: nitka-egress
+
+services:
+  ssh_tun_server:
+    container_name: nitka-ssh-tun-server
+    build:
+      context: ./ssh_tun_server
+      args:
+        vpn_username: {{ ssh_tun_ssh_username }}
+        public_ed25519_key: "{{ ssh_tun_ssh_public_key }}"
+        network_vpn_gateway_ipv4: {{ ssh_tun_network_vpn_gateway_ipv4 }}
+        network_vpn_gateway_cidr_ipv4: {{ ssh_tun_network_vpn_gateway_cidr_ipv4 }}
+        network_vpn_subnet_cidr_ipv4: {{ ssh_tun_network_vpn_subnet_cidr_ipv4 }}
+        network_container_vpn_ipv4: {{ ssh_tun_network_container_vpn_ipv4 }}
+        network_vpn_interface: {{ ssh_tun_network_interface }}
+    image: local/ssh-tun-server:latest
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "{{ ssh_tun_ssh_port }}:22"
+    networks:
+      nitka_egress:
+        ipv4_address: {{ ssh_tun_network_container_vpn_ipv4 }}
+    logging:
+      driver: none
+
+  unbound:
+    container_name: nitka-unbound
+    build:
+      context: ./dns
+    image: local/unbound:latest
+    depends_on:
+      ssh_tun_server:
+        condition: service_healthy
+    network_mode: "service:ssh_tun_server"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: none
+
+networks:
+  nitka_egress:
+    name: nitka_egress
+    driver: bridge
+    ipam:
+      config:
+        - subnet: {{ ssh_tun_network_container_subnet_cidr_ipv4 }}
+          gateway: {{ ssh_tun_network_container_gateway_ipv4 }}

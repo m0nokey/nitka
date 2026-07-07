@@ -1,0 +1,407 @@
+---
+- name: Prepare local ingress directories
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ ingress_local_dir }}"
+    - "{{ ingress_state_dir }}"
+
+- name: Prepare remote ingress directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ingress_remote_dir }}"
+    - "{{ ingress_remote_dir }}/clashrs"
+    - "{{ ingress_remote_dir }}/xray"
+
+- name: Generate xhttp UUID
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    if command -v uuidgen >/dev/null 2>&1; then
+      uuidgen
+    else
+      cat /proc/sys/kernel/random/uuid
+    fi > "{{ ingress_state_dir }}/xhttp_uuid"
+  args:
+    creates: "{{ ingress_state_dir }}/xhttp_uuid"
+  notify: restart ingress stack
+
+- name: Generate reality UUID
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    if command -v uuidgen >/dev/null 2>&1; then
+      uuidgen
+    else
+      cat /proc/sys/kernel/random/uuid
+    fi > "{{ ingress_state_dir }}/reality_uuid"
+  args:
+    creates: "{{ ingress_state_dir }}/reality_uuid"
+  notify: restart ingress stack
+
+- name: Generate xhttp port
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    port="{{ ingress_xray_xhttp_port | default('') }}"
+    if [ -z "$port" ]; then
+      port="$("{{ playbook_dir }}/scripts/generate_port.sh" {{ ingress_xray_xhttp_port_min }} {{ ingress_xray_xhttp_port_max }})"
+    fi
+    printf '%s\n' "$port" > "{{ ingress_state_dir }}/xhttp_port"
+  args:
+    creates: "{{ ingress_state_dir }}/xhttp_port"
+  notify: restart ingress stack
+
+- name: Generate reality port
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    port="{{ ingress_xray_reality_port | default('') }}"
+    if [ -z "$port" ]; then
+      port="$("{{ playbook_dir }}/scripts/generate_port.sh" {{ ingress_xray_reality_port_min }} {{ ingress_xray_reality_port_max }})"
+    fi
+    printf '%s\n' "$port" > "{{ ingress_state_dir }}/reality_port"
+  args:
+    creates: "{{ ingress_state_dir }}/reality_port"
+  notify: restart ingress stack
+
+- name: Generate reality short id
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    openssl rand -hex 8 > "{{ ingress_state_dir }}/reality_short_id"
+  args:
+    creates: "{{ ingress_state_dir }}/reality_short_id"
+  notify: restart ingress stack
+
+- name: Generate reality keypair
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    {{ ansible_playbook_python }} - <<'PY'
+    from base64 import urlsafe_b64encode
+    from pathlib import Path
+    from cryptography.hazmat.primitives.asymmetric import x25519
+    from cryptography.hazmat.primitives import serialization
+
+    state = Path("{{ ingress_state_dir }}")
+    priv_path = state / "reality_private_key"
+    pub_path = state / "reality_public_key"
+
+    private_key = x25519.X25519PrivateKey.generate()
+    public_key = private_key.public_key()
+
+    priv = private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    pub = public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+
+    priv_path.write_text(urlsafe_b64encode(priv).decode().rstrip("=") + "\n", encoding="utf-8")
+    pub_path.write_text(urlsafe_b64encode(pub).decode().rstrip("=") + "\n", encoding="utf-8")
+    PY
+  args:
+    creates: "{{ ingress_state_dir }}/reality_private_key"
+  notify: restart ingress stack
+
+- name: Set generated Xray state file permissions
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ ingress_state_dir }}/{{ item.name }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: 'xhttp_uuid', mode: '0600' }
+    - { name: 'reality_uuid', mode: '0600' }
+    - { name: 'xhttp_port', mode: '0600' }
+    - { name: 'reality_port', mode: '0600' }
+    - { name: 'reality_short_id', mode: '0600' }
+    - { name: 'reality_private_key', mode: '0600' }
+    - { name: 'reality_public_key', mode: '0644' }
+  changed_when: false
+
+- name: Read xhttp UUID
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.set_fact:
+    ingress_xray_xhttp_uuid: "{{ lookup('file', ingress_state_dir ~ '/xhttp_uuid') | trim }}"
+  changed_when: false
+
+- name: Read reality UUID
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.set_fact:
+    ingress_xray_reality_uuid: "{{ lookup('file', ingress_state_dir ~ '/reality_uuid') | trim }}"
+  changed_when: false
+
+- name: Read xhttp port
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.set_fact:
+    ingress_xray_xhttp_port: "{{ lookup('file', ingress_state_dir ~ '/xhttp_port') | trim }}"
+  changed_when: false
+
+- name: Read reality port
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.set_fact:
+    ingress_xray_reality_port: "{{ lookup('file', ingress_state_dir ~ '/reality_port') | trim }}"
+  changed_when: false
+
+- name: Read reality short id
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.set_fact:
+    ingress_xray_reality_short_id: "{{ lookup('file', ingress_state_dir ~ '/reality_short_id') | trim }}"
+  changed_when: false
+
+- name: Read reality public key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.set_fact:
+    ingress_xray_reality_public_key: "{{ lookup('file', ingress_state_dir ~ '/reality_public_key') | trim }}"
+  changed_when: false
+
+- name: Validate reality keypair consistency
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell: |
+    set -euo pipefail
+    {{ ansible_playbook_python }} - <<'PY'
+    from base64 import urlsafe_b64decode, urlsafe_b64encode
+    from pathlib import Path
+    from cryptography.hazmat.primitives.asymmetric import x25519
+    from cryptography.hazmat.primitives import serialization
+
+    state = Path("{{ ingress_state_dir }}")
+    private_text = (state / "reality_private_key").read_text(encoding="utf-8").strip()
+    public_text = (state / "reality_public_key").read_text(encoding="utf-8").strip()
+
+    def decode_xray_key(value: str) -> bytes:
+        padded = value + "=" * (-len(value) % 4)
+        return urlsafe_b64decode(padded.encode("ascii"))
+
+    private_raw = decode_xray_key(private_text)
+    if len(private_raw) != 32:
+        raise SystemExit(f"invalid reality private key length: {len(private_raw)}")
+
+    expected_public = x25519.X25519PrivateKey.from_private_bytes(private_raw).public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    expected_public_text = urlsafe_b64encode(expected_public).decode("ascii").rstrip("=")
+
+    if expected_public_text != public_text:
+        raise SystemExit("reality private/public key mismatch")
+    PY
+  changed_when: false
+
+- name: Build ingress share links
+  delegate_to: localhost
+  run_once: true
+  no_log: true
+  ansible.builtin.set_fact:
+    ingress_xray_xhttp_share_link: >-
+      vless://{{ ingress_xray_xhttp_uuid }}@{{ ingress_xray_public_host }}:{{ ingress_xray_xhttp_port }}?encryption=none&security=reality&sni={{ ingress_xray_obfs_host | urlencode }}&fp=chrome&pbk={{ ingress_xray_reality_public_key }}&sid={{ ingress_xray_reality_short_id }}&type=xhttp&path={{ ingress_xray_obfs_path | urlencode }}&mode=packet-up#{{ ingress_xray_xhttp_remarks | urlencode }}
+    ingress_xray_reality_share_link: >-
+      vless://{{ ingress_xray_reality_uuid }}@{{ ingress_xray_public_host }}:{{ ingress_xray_reality_port }}?encryption=none&security=reality&sni={{ ingress_xray_obfs_host | urlencode }}&fp=chrome&pbk={{ ingress_xray_reality_public_key }}&sid={{ ingress_xray_reality_short_id }}&type=tcp&flow=xtls-rprx-vision#{{ ingress_xray_reality_remarks | urlencode }}
+  changed_when: false
+
+- name: Write share links to file
+  delegate_to: localhost
+  run_once: true
+  no_log: true
+  ansible.builtin.copy:
+    dest: "{{ ingress_xray_share_link_path }}"
+    mode: "0600"
+    content: |
+      {{ ingress_xray_xhttp_share_link }}
+      {{ ingress_xray_reality_share_link }}
+  changed_when: false
+
+- name: Render docker compose
+  become: true
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ ingress_remote_dir }}/docker-compose.yml"
+    mode: "0644"
+    validate: docker compose -f %s config -q
+  notify: restart ingress stack
+
+- name: Render clash config
+  ansible.builtin.template:
+    src: clashrs/config.yaml.j2
+    dest: "{{ ingress_remote_dir }}/clashrs/config.yaml"
+    mode: "0644"
+  notify: restart ingress stack
+
+- name: Render xray config
+  become: true
+  ansible.builtin.template:
+    src: xray/config.json.j2
+    dest: "{{ ingress_remote_dir }}/xray/config.json"
+    mode: "0644"
+    validate: >-
+      docker run --rm
+      -v %s:/etc/xray/config.json:ro
+      ghcr.io/xtls/xray-core:26.6.27
+      run -test -c /etc/xray/config.json
+  notify: restart ingress stack
+
+- name: Render ingress watchdog script
+  become: true
+  ansible.builtin.template:
+    src: ingress_watchdog.sh.j2
+    dest: /usr/local/sbin/ingress_watchdog
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render ingress watchdog service
+  become: true
+  ansible.builtin.template:
+    src: ingress-watchdog.service.j2
+    dest: /etc/systemd/system/ingress-watchdog.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: ingress_watchdog_service
+
+- name: Render ingress watchdog timer
+  become: true
+  ansible.builtin.template:
+    src: ingress-watchdog.timer.j2
+    dest: /etc/systemd/system/ingress-watchdog.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: ingress_watchdog_timer
+
+- name: Render ingress stack ensure script
+  become: true
+  ansible.builtin.template:
+    src: ingress_stack_ensure.sh.j2
+    dest: /usr/local/sbin/ingress_stack_ensure
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Stop and disable legacy ingress watchdog timer before stack changes
+  become: true
+  ansible.builtin.command:
+    cmd: systemctl disable --now ingress-watchdog.timer
+  changed_when: false
+  failed_when: false
+
+- name: Mask legacy ingress watchdog timer before stack changes
+  become: true
+  ansible.builtin.command:
+    cmd: systemctl mask ingress-watchdog.timer
+  changed_when: false
+  failed_when: false
+
+- name: Reload systemd after masking legacy watchdog timer
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Stop ingress watchdog service before stack changes
+  become: true
+  ansible.builtin.systemd_service:
+    name: ingress-watchdog.service
+    state: stopped
+  failed_when: false
+
+- name: Ensure ingress stack is running
+  block:
+    - name: Run ingress stack ensure script
+      become: true
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/ingress_stack_ensure
+        chdir: "{{ ingress_remote_dir }}"
+      register: ingress_stack_run
+      changed_when: false
+      ignore_errors: true
+      ignore_unreachable: true
+
+    - name: Clear ingress host error after SSH interruption
+      ansible.builtin.meta: clear_host_errors
+      when: ingress_stack_run.unreachable | default(false)
+
+    - name: Wait for ingress SSH after interruption
+      ansible.builtin.wait_for_connection:
+        timeout: 180
+        delay: 5
+        sleep: 5
+      when: ingress_stack_run.unreachable | default(false)
+
+    - name: Reset ingress SSH connection after interruption
+      ansible.builtin.meta: reset_connection
+      when: ingress_stack_run.unreachable | default(false)
+
+    - name: Retry ingress stack ensure script after SSH interruption
+      become: true
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/ingress_stack_ensure
+        chdir: "{{ ingress_remote_dir }}"
+      register: ingress_stack_retry
+      changed_when: false
+      when: ingress_stack_run.unreachable | default(false)
+
+    - name: Fail if ingress stack ensure script failed
+      ansible.builtin.fail:
+        msg: >-
+          ingress stack ensure failed with rc={{ ingress_stack_run.rc | default('unknown') }}:
+          {{ ingress_stack_run.stderr | default(ingress_stack_run.msg | default('no stderr')) }}
+      when:
+        - not (ingress_stack_run.unreachable | default(false))
+        - ingress_stack_run.rc | default(0) != 0
+
+- name: Keep ingress watchdog timer masked and stopped
+  become: true
+  ansible.builtin.command:
+    cmd: systemctl mask --now ingress-watchdog.timer
+  changed_when: false
+  failed_when: false
+
+- name: Reload systemd before enabling ingress watchdog service
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Enable ingress watchdog service
+  become: true
+  ansible.builtin.systemd_service:
+    name: ingress-watchdog.service
+    enabled: true
+    state: "{{ 'restarted' if (ingress_watchdog_service.changed or ingress_watchdog_timer.changed) else 'started' }}"
+
+- name: Show ingress share link location
+  ansible.builtin.debug:
+    msg:
+      - "Saved to: {{ ingress_xray_share_link_path }}"
+      - "Use ./run.sh --show-links to print client links."
+  changed_when: false
