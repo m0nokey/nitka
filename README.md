@@ -12,18 +12,18 @@ flowchart LR
 
     subgraph L[local country]
         I[ingress VPS<br/>Xray<br/>routing rules]
+        LN[Internet<br/>local exit]
     end
 
     subgraph R[remote country]
         E[egress VPS<br/>SSH TUN server<br/>Unbound DNS]
+        RN[Internet<br/>remote exit]
     end
 
-    N[Internet]
-
     C --> I
-    I -->|DIRECT by default| N
+    I -->|DIRECT by default<br/>all non-listed traffic| LN
     I -->|PROXY whitelist<br/>SSH TUN transport| E
-    E --> N
+    E --> RN
 ```
 
 The scheme is designed to avoid a full-tunnel VPN mode on the client. Traffic is
@@ -32,9 +32,10 @@ The scheme is designed to avoid a full-tunnel VPN mode on the client. Traffic is
 remote egress routing to the services selected in the rules.
 
 The client connects only to the ingress VPS in the local country. From the local
-network point of view, selected proxy traffic terminates at local infrastructure;
-the separate remote egress path is handled between the two VPS nodes over the
-transport layer.
+network point of view, the visible VPN endpoint is local infrastructure. Traffic
+that is not listed in the routing policy exits normally through the local
+country. Only whitelist traffic is carried from ingress to egress over the
+transport layer and exits from the remote country.
 
 ## Requirements
 
