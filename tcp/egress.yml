@@ -5,26 +5,11 @@
   become: true
   vars_files:
     - group_vars/egress.yml
-  pre_tasks:
-    - name: Stop legacy egress compose stack before Nitka deploy
-      ansible.builtin.shell: |
-        set -euo pipefail
-        if [ -f /opt/egress/docker-compose.yml ] && [ "{{ egress_remote_dir }}" != "/opt/egress" ]; then
-          docker compose -f /opt/egress/docker-compose.yml -p egress down --remove-orphans || true
-          cd /opt/egress && docker compose down --remove-orphans || true
-        fi
-        docker rm -f ssh_tun_server unbound >/dev/null 2>&1 || true
-        docker network rm xray_split_gateway_egress_vpn >/dev/null 2>&1 || true
-        docker network rm nitka_egress_vpn >/dev/null 2>&1 || true
-      args:
-        executable: /bin/bash
-      changed_when: false
-      failed_when: false
   roles:
     - role: system_base
       vars:
         system_base_docker_updater_name: nitka-egress
-        system_base_docker_updater_compose_file: "{{ egress_remote_dir }}/docker-compose.yml"
+        system_base_docker_updater_compose_file: "{{ egress_remote_dir }}/compose.yml"
     - role: transports/ssh_tun
       vars:
         ssh_tun_endpoint: server

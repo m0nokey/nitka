@@ -19,30 +19,30 @@
     - ansible_facts.os_family == "Debian"
   register: system_base_debian_sources
 
-- name: Check legacy apt sources.list
+- name: Check default apt sources.list
   ansible.builtin.stat:
     path: /etc/apt/sources.list
   when:
     - system_base_manage_debian_repo | bool
     - ansible_facts.os_family == "Debian"
-  register: system_base_legacy_sources_list
+  register: system_base_default_sources_list
 
-- name: Remove legacy apt sources.list
+- name: Remove default apt sources.list after deb822 sources are configured
   ansible.builtin.file:
     path: /etc/apt/sources.list
     state: absent
   when:
     - system_base_manage_debian_repo | bool
     - ansible_facts.os_family == "Debian"
-    - system_base_legacy_sources_list.stat.exists | default(false)
-  register: system_base_legacy_sources_removed
+    - system_base_default_sources_list.stat.exists | default(false)
+  register: system_base_default_sources_removed
 
 - name: Update apt cache
   ansible.builtin.apt:
     update_cache: true
   when:
     - ansible_facts.os_family == "Debian"
-    - system_base_debian_sources.changed | default(false) or system_base_legacy_sources_removed.changed | default(false)
+    - system_base_debian_sources.changed | default(false) or system_base_default_sources_removed.changed | default(false)
 
 - name: Install base packages
   ansible.builtin.apt:
@@ -187,7 +187,7 @@
   when: system_base_enable_os_updater | bool
   register: system_base_os_updater_timer
 
-- name: Remove legacy OS updater logrotate configs
+- name: Remove previous OS updater logrotate configs
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
