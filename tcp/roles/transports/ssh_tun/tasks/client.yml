@@ -12,6 +12,16 @@
     mode: "0644"
   notify: restart ingress stack
 
+- name: Render SSH TUN client dockerignore
+  ansible.builtin.copy:
+    dest: "{{ ingress_remote_dir }}/ssh_tun_client/.dockerignore"
+    mode: "0644"
+    content: |
+      *
+      !Dockerfile
+      !entrypoint.sh
+  notify: restart ingress stack
+
 - name: Render SSH TUN client entrypoint
   ansible.builtin.template:
     src: client/entrypoint.sh.j2
@@ -19,11 +29,25 @@
     mode: "0755"
   notify: restart ingress stack
 
+- name: Render SSH TUN client environment
+  ansible.builtin.template:
+    src: client/security.env.j2
+    dest: "{{ ingress_remote_dir }}/ssh_tun_client/security.env"
+    mode: "0600"
+  notify: restart ingress stack
+
 - name: Render SSH TUN client config
   ansible.builtin.template:
     src: client/ssh_config.j2
     dest: "{{ ingress_remote_dir }}/ssh_tun_client/config"
     mode: "0600"
+  notify: restart ingress stack
+
+- name: Render SSH TUN client known hosts
+  ansible.builtin.template:
+    src: client/known_hosts.j2
+    dest: "{{ ingress_remote_dir }}/ssh_tun_client/known_hosts"
+    mode: "0644"
   notify: restart ingress stack
 
 - name: Copy SSH TUN keypair to client endpoint

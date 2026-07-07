@@ -21,6 +21,15 @@
     mode: "0644"
   notify: restart egress stack
 
+- name: Render unbound dockerignore
+  ansible.builtin.copy:
+    dest: "{{ egress_remote_dir }}/dns/.dockerignore"
+    mode: "0644"
+    content: |
+      *
+      !Dockerfile
+  notify: restart egress stack
+
 - name: Render unbound config
   ansible.builtin.template:
     src: unbound.conf.j2

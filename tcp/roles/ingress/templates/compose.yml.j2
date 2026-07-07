@@ -6,6 +6,8 @@ services:
     build:
       context: ./ssh_tun_client
     image: local/ssh-tun-client:latest
+    env_file:
+      - ./ssh_tun_client/security.env
     cap_add:
       - NET_ADMIN
       - NET_RAW

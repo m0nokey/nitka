@@ -20,15 +20,6 @@ RUN install -d -m 0750 -o unbound -g unbound /var/lib/unbound && \
     install -d -m 0750 -o unbound -g unbound /var/lib/unbound/rpz && \
     install -d -m 0750 -o unbound -g unbound /run/unbound
 
-COPY unbound.conf /tmp/unbound.conf
-COPY unbound.conf.d/ /tmp/unbound.conf.d/
-
-RUN install -D -m 0644 -o root -g root /tmp/unbound.conf /etc/unbound/unbound.conf && \
-    for conf in /tmp/unbound.conf.d/*.conf; do \
-      install -D -m 0644 -o root -g root "$conf" "/etc/unbound/unbound.conf.d/$(basename "$conf")"; \
-    done && \
-    rm -rf /tmp/unbound.conf /tmp/unbound.conf.d
-
 RUN install -D -m 0755 -o root -g root /dev/stdin /usr/local/bin/healthcheck <<'EOS'
 #!/bin/sh
 unbound-control -c /etc/unbound/unbound.conf status >/dev/null 2>&1 || exit 1
