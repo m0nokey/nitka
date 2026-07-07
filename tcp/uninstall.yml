@@ -19,6 +19,20 @@
         enabled: false
       failed_when: false
 
+    - name: Stop ingress docker updater timer
+      ansible.builtin.systemd_service:
+        name: nitka-ingress-docker-updater.timer
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Stop ingress docker updater service
+      ansible.builtin.systemd_service:
+        name: nitka-ingress-docker-updater.service
+        state: stopped
+        enabled: false
+      failed_when: false
+
     - name: Stop only this ingress compose project
       ansible.builtin.command:
         cmd: docker compose down --remove-orphans
@@ -33,8 +47,12 @@
       loop:
         - "{{ ingress_remote_dir }}"
         - /usr/local/sbin/ingress_watchdog
+        - /usr/local/sbin/ingress_stack_ensure
+        - /usr/local/sbin/nitka-ingress-docker-updater
         - /etc/systemd/system/ingress-watchdog.service
         - /etc/systemd/system/ingress-watchdog.timer
+        - /etc/systemd/system/nitka-ingress-docker-updater.service
+        - /etc/systemd/system/nitka-ingress-docker-updater.timer
 
     - name: Reload systemd after ingress removal
       ansible.builtin.systemd_service:
@@ -46,6 +64,20 @@
   vars_files:
     - group_vars/egress.yml
   tasks:
+    - name: Stop egress docker updater timer
+      ansible.builtin.systemd_service:
+        name: nitka-egress-docker-updater.timer
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Stop egress docker updater service
+      ansible.builtin.systemd_service:
+        name: nitka-egress-docker-updater.service
+        state: stopped
+        enabled: false
+      failed_when: false
+
     - name: Stop only this egress compose project
       ansible.builtin.command:
         cmd: docker compose down --remove-orphans
@@ -55,5 +87,14 @@
 
     - name: Remove egress files
       ansible.builtin.file:
-        path: "{{ egress_remote_dir }}"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "{{ egress_remote_dir }}"
+        - /usr/local/sbin/nitka-egress-docker-updater
+        - /etc/systemd/system/nitka-egress-docker-updater.service
+        - /etc/systemd/system/nitka-egress-docker-updater.timer
+
+    - name: Reload systemd after egress removal
+      ansible.builtin.systemd_service:
+        daemon_reload: true
