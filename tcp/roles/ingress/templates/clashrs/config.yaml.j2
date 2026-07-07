@@ -1,0 +1,15 @@
+port: 0
+socks-port: {{ ingress_clash_port }}
+allow-lan: true
+bind-address: 0.0.0.0
+mode: direct
+log-level: silent
+interface-name: {{ ssh_tun_network_interface }}
+tcp-concurrent: {{ ingress_clash_tcp_concurrent | ternary('true', 'false') }}
+external-controller: 127.0.0.1:9090
+
+dns:
+  enable: true
+  ipv6: false
+  nameserver:
+    - 10.11.12.1

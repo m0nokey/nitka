@@ -1,0 +1,140 @@
+---
+- name: Bootstrap ingress management user
+  hosts: ingress
+  become: true
+  vars:
+    bootstrap_node_user: ingress
+    bootstrap_node_group: ingress-admin
+    bootstrap_public_key_path: "{{ playbook_dir }}/.generated/management/ingress/id_ed25519.pub"
+  tasks:
+    - name: Install sudo
+      ansible.builtin.apt:
+        name: sudo
+        state: present
+        update_cache: true
+        install_recommends: false
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Create management group
+      ansible.builtin.group:
+        name: "{{ bootstrap_node_group }}"
+        state: present
+
+    - name: Create management user
+      ansible.builtin.user:
+        name: "{{ bootstrap_node_user }}"
+        group: "{{ bootstrap_node_group }}"
+        groups: sudo
+        append: true
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Ensure management SSH directory permissions
+      ansible.builtin.file:
+        path: "/home/{{ bootstrap_node_user }}/.ssh"
+        owner: "{{ bootstrap_node_user }}"
+        group: "{{ bootstrap_node_group }}"
+        mode: "0700"
+        state: directory
+
+    - name: Ensure management Ansible tmp directory permissions
+      ansible.builtin.file:
+        path: "/home/{{ bootstrap_node_user }}/.ansible/tmp"
+        owner: "{{ bootstrap_node_user }}"
+        group: "{{ bootstrap_node_group }}"
+        mode: "0700"
+        state: directory
+
+    - name: Install management SSH authorized key
+      ansible.builtin.copy:
+        dest: "/home/{{ bootstrap_node_user }}/.ssh/authorized_keys"
+        owner: "{{ bootstrap_node_user }}"
+        group: "{{ bootstrap_node_group }}"
+        mode: "0600"
+        content: "{{ lookup('file', bootstrap_public_key_path) | trim }}\n"
+
+    - name: Install passwordless sudoers file
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ bootstrap_node_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+        content: |
+          {{ bootstrap_node_user }} ALL=(ALL) NOPASSWD:ALL
+
+    - name: Verify passwordless sudo
+      become_user: "{{ bootstrap_node_user }}"
+      ansible.builtin.command: sudo -n true
+      changed_when: false
+
+- name: Bootstrap egress management user
+  hosts: egress
+  become: true
+  vars:
+    bootstrap_node_user: egress
+    bootstrap_node_group: egress-admin
+    bootstrap_public_key_path: "{{ playbook_dir }}/.generated/management/egress/id_ed25519.pub"
+  tasks:
+    - name: Install sudo
+      ansible.builtin.apt:
+        name: sudo
+        state: present
+        update_cache: true
+        install_recommends: false
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Create management group
+      ansible.builtin.group:
+        name: "{{ bootstrap_node_group }}"
+        state: present
+
+    - name: Create management user
+      ansible.builtin.user:
+        name: "{{ bootstrap_node_user }}"
+        group: "{{ bootstrap_node_group }}"
+        groups: sudo
+        append: true
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Ensure management SSH directory permissions
+      ansible.builtin.file:
+        path: "/home/{{ bootstrap_node_user }}/.ssh"
+        owner: "{{ bootstrap_node_user }}"
+        group: "{{ bootstrap_node_group }}"
+        mode: "0700"
+        state: directory
+
+    - name: Ensure management Ansible tmp directory permissions
+      ansible.builtin.file:
+        path: "/home/{{ bootstrap_node_user }}/.ansible/tmp"
+        owner: "{{ bootstrap_node_user }}"
+        group: "{{ bootstrap_node_group }}"
+        mode: "0700"
+        state: directory
+
+    - name: Install management SSH authorized key
+      ansible.builtin.copy:
+        dest: "/home/{{ bootstrap_node_user }}/.ssh/authorized_keys"
+        owner: "{{ bootstrap_node_user }}"
+        group: "{{ bootstrap_node_group }}"
+        mode: "0600"
+        content: "{{ lookup('file', bootstrap_public_key_path) | trim }}\n"
+
+    - name: Install passwordless sudoers file
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ bootstrap_node_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+        content: |
+          {{ bootstrap_node_user }} ALL=(ALL) NOPASSWD:ALL
+
+    - name: Verify passwordless sudo
+      become_user: "{{ bootstrap_node_user }}"
+      ansible.builtin.command: sudo -n true
+      changed_when: false

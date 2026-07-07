@@ -1,0 +1,15 @@
+.generated/
+.xsg-state/
+*.retry
+*.log
+__pycache__/
+.pytest_cache/
+.DS_Store
+*.vault-password
+secrets.env.plain.*
+group_vars/*.yml
+!group_vars/*.example.yml
+inventory/*.yml
+!inventory/*.example.yml
+routing/rules.yml
+shadowrocket.conf

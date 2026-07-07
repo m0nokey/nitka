@@ -1,0 +1,16 @@
+name: nitka
+
+services:
+  ansible:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nitka-ansible:latest
+    working_dir: /workspace/tcp
+    environment:
+      ANSIBLE_CONFIG: /workspace/tcp/ansible.cfg
+    volumes:
+      - .:/workspace
+      - ${NITKA_STATE_DIR:?set by run.sh}:/workspace/tcp/.generated
+    stdin_open: true
+    tty: true

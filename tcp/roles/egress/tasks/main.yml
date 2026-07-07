@@ -1,0 +1,64 @@
+- name: Create remote deployment tree
+  ansible.builtin.file:
+    path: "{{ egress_remote_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - dns
+    - dns/unbound.conf.d
+
+- name: Render docker compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ egress_remote_dir }}/docker-compose.yml"
+    mode: "0644"
+  notify: restart egress stack
+
+- name: Render unbound Dockerfile
+  ansible.builtin.template:
+    src: dns/Dockerfile.j2
+    dest: "{{ egress_remote_dir }}/dns/Dockerfile"
+    mode: "0644"
+  notify: restart egress stack
+
+- name: Render unbound config
+  ansible.builtin.template:
+    src: unbound.conf.j2
+    dest: "{{ egress_remote_dir }}/dns/unbound.conf"
+    mode: "0644"
+  notify: restart egress stack
+
+- name: Render unbound server config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/00-server.conf.j2
+    dest: "{{ egress_remote_dir }}/dns/unbound.conf.d/00-server.conf"
+    mode: "0644"
+  notify: restart egress stack
+
+- name: Render unbound forward config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/10-forward.conf.j2
+    dest: "{{ egress_remote_dir }}/dns/unbound.conf.d/10-forward.conf"
+    mode: "0644"
+  notify: restart egress stack
+
+- name: Render unbound remote-control config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/20-remote-control.conf.j2
+    dest: "{{ egress_remote_dir }}/dns/unbound.conf.d/20-remote-control.conf"
+    mode: "0644"
+  notify: restart egress stack
+
+- name: Render unbound statistics config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/30-stats.conf.j2
+    dest: "{{ egress_remote_dir }}/dns/unbound.conf.d/30-stats.conf"
+    mode: "0644"
+  notify: restart egress stack
+
+- name: Render unbound RPZ config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/40-rpz.conf.j2
+    dest: "{{ egress_remote_dir }}/dns/unbound.conf.d/40-rpz.conf"
+    mode: "0644"
+  notify: restart egress stack

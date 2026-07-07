@@ -1,0 +1,26 @@
+---
+system_base_timezone: UTC
+system_base_manage_debian_repo: true
+system_base_enable_os_updater: true
+system_base_enable_docker_updater: true
+
+system_base_required_packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg2
+  - lsb-release
+
+system_base_docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+system_base_docker_updater_calendar: "*-*-* 02:00"
+system_base_docker_updater_randomized_delay_sec: 7m
+system_base_docker_updater_timeout: 30m
+system_base_docker_updater_health_timeout: 120
+system_base_docker_updater_prune_builder_until: 24h
+system_base_docker_updater_services: []

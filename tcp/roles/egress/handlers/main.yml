@@ -1,0 +1,63 @@
+
+---
+- name: restart egress stack
+  ansible.builtin.shell: |
+    set -uo pipefail
+    nitka_debug="{{ nitka_debug | default(false) | bool | ternary('1', '0') }}"
+    if [ "$nitka_debug" = "1" ]; then
+      echo "===== docker compose config ====="
+      docker compose config
+      echo "===== docker compose up ====="
+    fi
+    build_if_needed() {
+      service="$1"
+      image="$2"
+      context="$3"
+      state_dir=".build-fingerprints"
+      state_file="$state_dir/${service}.sha256"
+      mkdir -p "$state_dir"
+      fingerprint="$(
+        {
+          docker compose config
+          find "$context" -type f -print0 | sort -z | xargs -0 sha256sum
+        } | sha256sum | awk '{print $1}'
+      )"
+      old_fingerprint="$(cat "$state_file" 2>/dev/null || true)"
+      if ! docker image inspect "$image" >/dev/null 2>&1 || [ "$fingerprint" != "$old_fingerprint" ]; then
+        docker compose build "$service" || return 1
+        printf '%s\n' "$fingerprint" > "$state_file"
+      fi
+    }
+    build_if_needed ssh_tun_server local/ssh-tun-server:latest ./ssh_tun_server || exit 1
+    build_if_needed unbound local/unbound:latest ./dns || exit 1
+    docker compose up -d --no-build --remove-orphans
+    rc1=$?
+    if [ "$nitka_debug" = "1" ]; then
+      echo "===== docker compose recreate unbound ====="
+    fi
+    docker compose up -d --force-recreate --no-deps unbound
+    rc2=$?
+    if [ "$nitka_debug" = "1" ]; then
+      echo "===== docker compose ps ====="
+      docker compose ps -a || true
+      echo "===== docker ps ====="
+      docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' || true
+      echo "===== container state ====="
+      for container in nitka-ssh-tun-server nitka-unbound; do
+        docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
+      done
+      echo "===== docker compose logs ====="
+      docker compose logs --tail=160 || true
+      echo "===== direct container logs ====="
+      for container in nitka-ssh-tun-server nitka-unbound; do
+        echo "----- $container -----"
+        docker logs --tail=120 "$container" 2>&1 || true
+      done
+    fi
+    if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ]; then
+      exit 1
+    fi
+  args:
+    chdir: "{{ egress_remote_dir }}"
+    executable: /bin/bash
+  become: true

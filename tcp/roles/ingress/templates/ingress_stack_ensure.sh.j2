@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+nitka_debug="{{ nitka_debug | default(false) | bool | ternary('1', '0') }}"
+
+wait_healthy() {
+    container="$1"
+    timeout="$2"
+    end=$((SECONDS + timeout))
+    while [ "$SECONDS" -lt "$end" ]; do
+        status="$(docker inspect -f '{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}{% endraw %}' "$container" 2>/dev/null || true)"
+        [ "$status" = "healthy" ] && return 0
+        sleep 2
+    done
+    docker inspect -f "$container state={% raw %}{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
+    return 1
+}
+
+build_if_needed() {
+    service="$1"
+    image="$2"
+    context="$3"
+    state_dir=".build-fingerprints"
+    state_file="$state_dir/${service}.sha256"
+    mkdir -p "$state_dir"
+    fingerprint="$(
+        {
+            docker compose config
+            find "$context" -type f -print0 | sort -z | xargs -0 sha256sum
+        } | sha256sum | awk '{print $1}'
+    )"
+    old_fingerprint="$(cat "$state_file" 2>/dev/null || true)"
+    if ! docker image inspect "$image" >/dev/null 2>&1 || [ "$fingerprint" != "$old_fingerprint" ]; then
+        docker compose build "$service" || return 1
+        printf '%s\n' "$fingerprint" > "$state_file"
+    fi
+}
+
+latest_semver_release() {
+    repo="$1"
+    curl -fsSL --connect-timeout 10 --max-time 30 \
+        "https://api.github.com/repos/${repo}/releases?per_page=20" \
+    | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' \
+    | head -n1
+}
+
+resolve_release_image() {
+    service="$1"
+    repo="$2"
+    template="$3"
+    alias="$4"
+    ref="$template"
+    tag=""
+    if [[ "$template" == *"{tag}"* || "$template" == *"{tag_no_v}"* ]]; then
+        tag="$(latest_semver_release "$repo")"
+        [ -n "$tag" ] || {
+            echo "could not resolve latest release for $repo" >&2
+            return 1
+        }
+        tag_no_v="${tag#v}"
+        ref="$(printf '%s' "$template" | sed "s/{tag_no_v}/${tag_no_v}/g; s/{tag}/${tag}/g")"
+        echo "resolved ${service} latest release ${tag}: ${ref}"
+    else
+        echo "using static release image for ${service}: ${ref}"
+    fi
+    docker pull "$ref" >/dev/null || return 1
+    docker image tag "$ref" "$alias"
+}
+
+remove_ingress_dependents() {
+    docker compose rm -f -s clashrs xray >/dev/null 2>&1 || true
+    docker rm -f nitka-clashrs nitka-xray >/dev/null 2>&1 || true
+    for container in nitka-clashrs nitka-xray; do
+        end=$((SECONDS + 20))
+        while docker inspect "$container" >/dev/null 2>&1 && [ "$SECONDS" -lt "$end" ]; do
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            sleep 1
+        done
+        if docker inspect "$container" >/dev/null 2>&1; then
+            docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} error={{.State.Error}} net={{json .HostConfig.NetworkMode}}{% endraw %}" "$container" 2>/dev/null || true
+            return 1
+        fi
+    done
+}
+
+reset_ingress_stack_for_recovery() {
+    docker update --restart=no nitka-clashrs nitka-xray >/dev/null 2>&1 || true
+    docker rm -f nitka-xray nitka-clashrs >/dev/null 2>&1 || true
+    for container in nitka-xray nitka-clashrs; do
+        end=$((SECONDS + 30))
+        while docker inspect "$container" >/dev/null 2>&1 && [ "$SECONDS" -lt "$end" ]; do
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            sleep 1
+        done
+        if docker inspect "$container" >/dev/null 2>&1; then
+            docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} error={{.State.Error}} net={{json .HostConfig.NetworkMode}}{% endraw %}" "$container" 2>/dev/null || true
+            return 1
+        fi
+    done
+}
+
+if [ "$nitka_debug" = "1" ]; then
+    echo "===== docker compose config ====="
+    docker compose config
+    echo "===== docker compose up ====="
+fi
+
+build_if_needed ssh_tun_client local/ssh-tun-client:latest ./ssh_tun_client || exit 1
+resolve_release_image clashrs Watfaq/clash-rs 'ghcr.io/watfaq/clash-rs:latest' local/clash-rs:latest || exit 1
+resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:{tag_no_v}' local/xray-core:auto || exit 1
+
+# Keep the SSH tunnel container stable. Config changes are applied by recreating
+# only services that depend on its network namespace, so deploys do not tear down
+# the whole ingress stack and do not wipe anonymous volumes.
+docker compose up -d --no-build --remove-orphans --no-deps ssh_tun_client || exit 1
+wait_healthy nitka-ssh-tun-client 90 || exit 1
+remove_ingress_dependents || exit 1
+docker compose up -d --force-recreate --no-deps clashrs || exit 1
+wait_healthy nitka-clashrs 60 || exit 1
+docker compose up -d --force-recreate --no-deps xray || exit 1
+rc=0
+
+if [ "$nitka_debug" = "1" ]; then
+    echo "===== docker compose ps ====="
+    docker compose ps -a || true
+    echo "===== docker ps ====="
+    docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' || true
+    echo "===== container state ====="
+    for container in nitka-ssh-tun-client nitka-clashrs nitka-xray; do
+        docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
+    done
+    echo "===== docker compose logs ====="
+    docker compose logs --tail=200 || true
+    echo "===== direct container logs ====="
+    for container in nitka-ssh-tun-client nitka-clashrs nitka-xray; do
+        echo "----- $container -----"
+        docker logs --tail=120 "$container" 2>&1 || true
+    done
+fi
+
+exit "$rc"

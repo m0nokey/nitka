@@ -1,0 +1,59 @@
+---
+- name: Uninstall ingress stack
+  hosts: ingress
+  become: true
+  vars_files:
+    - group_vars/ingress.yml
+  tasks:
+    - name: Stop ingress watchdog timer
+      ansible.builtin.systemd_service:
+        name: ingress-watchdog.timer
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Stop ingress watchdog service
+      ansible.builtin.systemd_service:
+        name: ingress-watchdog.service
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Stop only this ingress compose project
+      ansible.builtin.command:
+        cmd: docker compose down --remove-orphans
+        chdir: "{{ ingress_remote_dir }}"
+      failed_when: false
+      changed_when: false
+
+    - name: Remove ingress files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ ingress_remote_dir }}"
+        - /usr/local/sbin/ingress_watchdog
+        - /etc/systemd/system/ingress-watchdog.service
+        - /etc/systemd/system/ingress-watchdog.timer
+
+    - name: Reload systemd after ingress removal
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+- name: Uninstall egress stack
+  hosts: egress
+  become: true
+  vars_files:
+    - group_vars/egress.yml
+  tasks:
+    - name: Stop only this egress compose project
+      ansible.builtin.command:
+        cmd: docker compose down --remove-orphans
+        chdir: "{{ egress_remote_dir }}"
+      failed_when: false
+      changed_when: false
+
+    - name: Remove egress files
+      ansible.builtin.file:
+        path: "{{ egress_remote_dir }}"
+        state: absent

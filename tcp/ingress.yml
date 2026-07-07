@@ -1,0 +1,57 @@
+---
+- name: Deploy ingress stack
+  hosts: ingress
+  become: true
+  vars_files:
+    - group_vars/egress.yml
+    - group_vars/ingress.yml
+    - routing/rules.yml
+  pre_tasks:
+    - name: Verify ingress playbook revision marker
+      ansible.builtin.debug:
+        msg: "ingress watchdog fix revision: masked-timer-pre-tasks-v2"
+
+    - name: Pre-stop legacy ingress watchdog timer before any ingress role
+      ansible.builtin.command:
+        cmd: systemctl disable --now ingress-watchdog.timer
+      changed_when: false
+      failed_when: false
+
+    - name: Pre-mask legacy ingress watchdog timer before any ingress role
+      ansible.builtin.command:
+        cmd: systemctl mask ingress-watchdog.timer
+      changed_when: false
+      failed_when: false
+
+    - name: Pre-stop ingress watchdog service before stack changes
+      ansible.builtin.systemd_service:
+        name: ingress-watchdog.service
+        state: stopped
+      failed_when: false
+
+    - name: Pre-reload systemd after legacy watchdog stop
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Stop legacy ingress compose stack before Nitka deploy
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if [ -f /opt/ingress/docker-compose.yml ] && [ "{{ ingress_remote_dir }}" != "/opt/ingress" ]; then
+          docker compose -f /opt/ingress/docker-compose.yml -p ingress down --remove-orphans || true
+          cd /opt/ingress && docker compose down --remove-orphans || true
+        fi
+        docker rm -f ssh_tun_client clashrs xray >/dev/null 2>&1 || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+  roles:
+    - role: system_base
+      vars:
+        system_base_docker_updater_name: nitka-ingress
+        system_base_docker_updater_compose_file: "{{ ingress_remote_dir }}/docker-compose.yml"
+    - role: transports/ssh_tun
+      vars:
+        ssh_tun_endpoint: client
+    - ingress

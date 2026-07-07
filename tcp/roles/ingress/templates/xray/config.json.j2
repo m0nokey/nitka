@@ -1,0 +1,228 @@
+{% set xray_block_domains = ingress_xray_block_domains | default([]) | unique | list %}
+{% set xray_block_ips = ingress_xray_block_ips | default([]) | unique | list %}
+{% set xray_reality_direct_domains = ingress_xray_reality_direct_domains | default([]) | unique | list %}
+{% set xray_reality_direct_ips = ingress_xray_reality_direct_ips | default([]) | unique | list %}
+{% set xray_xhttp_direct_domains = ingress_xray_xhttp_direct_domains | default([]) | unique | list %}
+{% set xray_xhttp_direct_ips = ingress_xray_xhttp_direct_ips | default([]) | unique | list %}
+{% set xray_proxy_domains = ingress_xray_reality_proxy_domains | default([]) | unique | list %}
+{% set xray_proxy_ips = ingress_xray_reality_proxy_ips | default([]) | unique | list %}
+{% set xray_dns_direct_domains = ingress_xray_dns_direct_domains | default([]) | unique | list %}
+{
+  "log": {
+    "access": "none",
+    "error": "none",
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "xhttp",
+      "listen": "0.0.0.0",
+      "port": {{ ingress_xray_xhttp_port }},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "{{ ingress_xray_xhttp_uuid }}",
+            "email": "xhttp"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "{{ ingress_xray_obfs_host }}:443",
+          "serverNames": ["{{ ingress_xray_obfs_host }}"],
+          "privateKey": "{{ lookup('file', ingress_state_dir ~ '/reality_private_key') | trim }}",
+          "shortIds": ["{{ ingress_xray_reality_short_id }}"],
+          "xver": 0,
+          "fingerprint": "chrome"
+        },
+        "xhttpSettings": {
+          "path": "{{ ingress_xray_obfs_path }}",
+          "mode": "packet-up"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": true
+      }
+    },
+    {
+      "tag": "reality",
+      "listen": "0.0.0.0",
+      "port": {{ ingress_xray_reality_port }},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "{{ ingress_xray_reality_uuid }}",
+            "email": "reality",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "{{ ingress_xray_obfs_host }}:443",
+          "serverNames": ["{{ ingress_xray_obfs_host }}"],
+          "privateKey": "{{ lookup('file', ingress_state_dir ~ '/reality_private_key') | trim }}",
+          "shortIds": ["{{ ingress_xray_reality_short_id }}"],
+          "xver": 0,
+          "fingerprint": "chrome"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "socks",
+      "tag": "proxy",
+      "settings": {
+        "servers": [
+          {
+            "address": "ssh_tun_client",
+            "port": {{ ingress_clash_port }}
+          }
+        ]
+      }
+    },
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "blocked"
+    }
+  ],
+  "dns": {
+    "queryStrategy": "UseIPv4",
+    "servers": [
+{% for server in ingress_xray_dns_direct_servers %}
+      {
+        "address": "{{ server.address }}"{% if server.port is defined %},
+        "port": {{ server.port }}{% endif %},
+        "domains": {{ xray_dns_direct_domains | to_json }}
+      },
+{% endfor %}
+      "https://dns.quad9.net/dns-query"
+    ]
+  },
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "network": "tcp,udp",
+        "port": "853",
+        "outboundTag": "blocked"
+      },
+      {
+        "type": "field",
+        "domain": {{ xray_block_domains | to_json }},
+        "outboundTag": "blocked"
+      },
+{% if xray_block_ips | length > 0 %}
+      {
+        "type": "field",
+        "ip": {{ xray_block_ips | to_json }},
+        "outboundTag": "blocked"
+      },
+{% endif %}
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["reality"],
+        "domain": {{ xray_reality_direct_domains | to_json }},
+        "outboundTag": "direct"
+      },
+{% if xray_reality_direct_ips | length > 0 %}
+      {
+        "type": "field",
+        "inboundTag": ["reality"],
+        "ip": {{ xray_reality_direct_ips | to_json }},
+        "outboundTag": "direct"
+      },
+{% endif %}
+      {
+        "type": "field",
+        "inboundTag": ["reality"],
+        "domain": {{ xray_proxy_domains | to_json }},
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["reality"],
+        "ip": {{ xray_proxy_ips | to_json }},
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["reality"],
+        "network": "tcp,udp",
+        "port": "1090,20215,22020,22021,22022,22025",
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["reality"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["xhttp"],
+        "domain": {{ xray_xhttp_direct_domains | to_json }},
+        "outboundTag": "direct"
+      },
+{% if xray_xhttp_direct_ips | length > 0 %}
+      {
+        "type": "field",
+        "inboundTag": ["xhttp"],
+        "ip": {{ xray_xhttp_direct_ips | to_json }},
+        "outboundTag": "direct"
+      },
+{% endif %}
+      {
+        "type": "field",
+        "inboundTag": ["xhttp"],
+        "domain": {{ xray_proxy_domains | to_json }},
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["xhttp"],
+        "ip": {{ xray_proxy_ips | to_json }},
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["xhttp"],
+        "network": "tcp,udp",
+        "port": "1090,20215,22020,22021,22022,22025",
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["xhttp"],
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}

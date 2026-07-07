@@ -1,0 +1,15 @@
+[Unit]
+Description=ingress Docker namespace watchdog
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/ingress_watchdog --loop
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
