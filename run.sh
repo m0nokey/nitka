@@ -2327,13 +2327,48 @@ audit_images_project() {
     return "$rc"
 }
 
+sync_egress_host_key() {
+    local host_key_file="${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
+    local scan_output current_key
+
+    require_file "${project_state}"
+    # shellcheck disable=SC1090
+    source "${project_state}"
+
+    mkdir -p "$(dirname -- "$host_key_file")"
+
+    scan_output="$(
+        ssh-keyscan -p "${ssh_tun_port}" -t ed25519 "${egress_ip}" 2>/dev/null \
+        | awk '$1 !~ /^#/ && $2 == "ssh-ed25519" {print $2 " " $3 " nitka-ssh-tun-server"; exit}'
+    )"
+
+    if [[ -z "$scan_output" ]]; then
+        log::warn "Could not scan egress SSH TUN host key from ${egress_ip}:${ssh_tun_port}; using existing state."
+        require_file "$host_key_file"
+        return 0
+    fi
+
+    current_key="$(cat "$host_key_file" 2>/dev/null || true)"
+    if [[ "$current_key" != "$scan_output" ]]; then
+        printf '%s\n' "$scan_output" > "$host_key_file"
+        chmod 0644 "$host_key_file"
+        log::warn "Updated egress SSH TUN host key pin from ${egress_ip}:${ssh_tun_port}."
+        persist_vault
+    fi
+}
+
+deploy_ingress_project() {
+    sync_egress_host_key || return $?
+    ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
+}
+
 deploy_project() {
     require_management_keys
     ansible_run ansible-playbook -i inventory/egress.yml egress.yml || {
         [[ "${nitka_debug}" == "1" ]] && debug_docker_project || true
         return 1
     }
-    ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml || {
+    deploy_ingress_project || {
         [[ "${nitka_debug}" == "1" ]] && debug_docker_project || true
         return 1
     }
@@ -2593,7 +2628,7 @@ show_deploy_menu() {
                 wait_action_return
                 ;;
             3)
-                with_materialized_state ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
+                with_materialized_state deploy_ingress_project
                 wait_action_return
                 ;;
             4)
@@ -2643,7 +2678,7 @@ show_operations_menu() {
                 materialize_from_vault
                 regen_xray_keys
                 refresh_group_vars_from_state
-                ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
+                deploy_ingress_project
                 print_client_links
                 persist_vault
                 lock_state
@@ -2653,7 +2688,7 @@ show_operations_menu() {
                 materialize_from_vault
                 regen_ssh_tun_key
                 ansible_run ansible-playbook -i inventory/egress.yml egress.yml
-                ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
+                deploy_ingress_project
                 persist_vault
                 lock_state
                 wait_action_return
@@ -2852,7 +2887,7 @@ setup_project() {
     persist_vault || return $?
 
     ui_step "5/6" "Deploying ingress stack..."
-    ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml || return $?
+    deploy_ingress_project || return $?
 
     require_file "${generated_dir}/ingress/share-links.txt" || return $?
 
@@ -3020,7 +3055,7 @@ case "${cmd}" in
 
     ingress)
         theme::init
-        with_materialized_state ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
+        with_materialized_state deploy_ingress_project
         ;;
 
     deploy)
@@ -3050,7 +3085,7 @@ case "${cmd}" in
                 materialize_from_vault
                 regen_xray_keys
                 refresh_group_vars_from_state
-                ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
+                deploy_ingress_project
                 require_file "${generated_dir}/ingress/share-links.txt"
                 cat "${generated_dir}/ingress/share-links.txt"
                 persist_vault
@@ -3060,7 +3095,7 @@ case "${cmd}" in
                 materialize_from_vault
                 regen_ssh_tun_key
                 ansible_run ansible-playbook -i inventory/egress.yml egress.yml
-                ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
+                deploy_ingress_project
                 persist_vault
                 lock_state
                 ;;
