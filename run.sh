@@ -250,7 +250,7 @@ usage() {
     usage_item() {
         local command="$1"
         local description="$2"
-        printf '    %s%-18s%s %s%s%s\n' \
+        printf '    %s%-36s%s %s%s%s\n' \
             "$COLOR_LINE" \
             "$command" \
             "$COLOR_RESET" \
