@@ -226,10 +226,16 @@ The public example profile is `shadowrocket.example.conf`. The real
 ## Commands
 
 The interactive menu is the primary interface. Direct commands are available for
-automation, debugging, and repeatable operations:
+automation, debugging, and repeatable operations. The complete command list with
+descriptions is available with:
 
 ```bash
 ./run.sh --help
+```
+
+Most common direct commands:
+
+```bash
 ./run.sh --setup
 ./run.sh --deploy
 ./run.sh --show-links
@@ -239,29 +245,17 @@ automation, debugging, and repeatable operations:
 ./run.sh --lock
 ```
 
-Manual deployment order, if running individual stages:
-
-1. From `tcp/`, run `egress.yml`
-2. From `tcp/`, run `ingress.yml`
-
-Use the portable runner from the repository root:
+Manual deployment targets:
 
 ```bash
-./run.sh --egress
-./run.sh --ingress
+./run.sh --egress      # deploy only the egress node
+./run.sh --ingress     # deploy only the ingress node
+./run.sh --syntax      # run Ansible syntax checks
 ```
 
-Manual flow:
-
-```bash
-./run.sh --init
-./run.sh --build
-./run.sh --bootstrap
-./run.sh --harden-ssh
-./run.sh --syntax
-./run.sh --deploy
-./run.sh --show-links
-```
+`./run.sh --sync-egress-host-key` is a recovery operation for SSH TUN host-key
+pinning. It shows the current pinned fingerprint and the live egress fingerprint,
+updates encrypted state only after confirmation, and then deploys ingress.
 
 ## Encrypted State
 
