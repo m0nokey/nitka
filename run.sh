@@ -2280,7 +2280,7 @@ audit_images_project() {
         -b \
         -m template \
         -a "src=${audit_template} dest=${audit_remote_script} mode=0755" \
-        -e "audit_remote_dir=${remote_dir}" || return $?
+        -e "audit_remote_dir=${remote_dir}" >/dev/null || return $?
 
     local rc=0
     set +e
