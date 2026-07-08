@@ -295,6 +295,7 @@ usage() {
     usage_item "--uninstall" "Remove only this project from both nodes."
     usage_item "--lock" "Remove local decrypted/materialized cache."
     usage_item "--save-state" "Encrypt current local materialized config into the Vault."
+    usage_item "--sync-egress-host-key" "Review and update the pinned SSH TUN egress host key, then deploy ingress."
     usage_item "--backup-state [path]" "Archive the encrypted Vault file for transfer and restore."
     usage_item "--restore-state <archive>" "Restore the encrypted Vault file from a backup archive."
     usage_item "--state-path" "Show encrypted state path."
@@ -2327,9 +2328,53 @@ audit_images_project() {
     return "$rc"
 }
 
+ssh_key_fingerprint() {
+    local key_file="$1"
+    if [[ -s "$key_file" ]]; then
+        ssh-keygen -lf "$key_file" 2>/dev/null | awk '{print $2 " " $4}'
+    else
+        printf 'missing\n'
+    fi
+}
+
+scan_egress_host_key() {
+    local host="$1" port="$2" tmp_known_hosts scanned_key
+
+    scanned_key="$(
+        ssh-keyscan -p "${port}" -t ed25519 "${host}" 2>/dev/null \
+        | awk '$1 !~ /^#/ && $2 == "ssh-ed25519" {print $2 " " $3 " nitka-ssh-tun-server"; exit}'
+    )"
+
+    if [[ -n "$scanned_key" ]]; then
+        printf '%s\n' "$scanned_key"
+        return 0
+    fi
+
+    tmp_known_hosts="$(mktemp "${state_root}/known-hosts.XXXXXX")"
+    ssh -p "$port" \
+        -o StrictHostKeyChecking=accept-new \
+        -o UserKnownHostsFile="$tmp_known_hosts" \
+        -o HostKeyAlgorithms=ssh-ed25519 \
+        -o PubkeyAuthentication=no \
+        -o PasswordAuthentication=no \
+        -o KbdInteractiveAuthentication=no \
+        -o ConnectTimeout=8 \
+        -o LogLevel=ERROR \
+        "${ssh_tun_username:-vpnuser}@${host}" true >/dev/null 2>&1 || true
+
+    scanned_key="$(
+        ssh-keygen -F "[${host}]:${port}" -f "$tmp_known_hosts" 2>/dev/null \
+        | awk '$2 == "ssh-ed25519" {print $2 " " $3 " nitka-ssh-tun-server"; exit}'
+    )"
+    rm -f "$tmp_known_hosts"
+
+    [[ -n "$scanned_key" ]] || return 1
+    printf '%s\n' "$scanned_key"
+}
+
 sync_egress_host_key() {
     local host_key_file="${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
-    local scan_output current_key
+    local scanned_key current_key answer old_fingerprint new_fingerprint
 
     require_file "${project_state}"
     # shellcheck disable=SC1090
@@ -2337,28 +2382,46 @@ sync_egress_host_key() {
 
     mkdir -p "$(dirname -- "$host_key_file")"
 
-    scan_output="$(
-        ssh-keyscan -p "${ssh_tun_port}" -t ed25519 "${egress_ip}" 2>/dev/null \
-        | awk '$1 !~ /^#/ && $2 == "ssh-ed25519" {print $2 " " $3 " nitka-ssh-tun-server"; exit}'
-    )"
-
-    if [[ -z "$scan_output" ]]; then
-        log::warn "Could not scan egress SSH TUN host key from ${egress_ip}:${ssh_tun_port}; using existing state."
-        require_file "$host_key_file"
-        return 0
-    fi
+    scanned_key="$(scan_egress_host_key "$egress_ip" "$ssh_tun_port")" || {
+        log::error "Could not scan egress SSH TUN host key from ${egress_ip}:${ssh_tun_port}."
+        return 1
+    }
 
     current_key="$(cat "$host_key_file" 2>/dev/null || true)"
-    if [[ "$current_key" != "$scan_output" ]]; then
-        printf '%s\n' "$scan_output" > "$host_key_file"
-        chmod 0644 "$host_key_file"
-        log::warn "Updated egress SSH TUN host key pin from ${egress_ip}:${ssh_tun_port}."
-        persist_vault
+    old_fingerprint="$(ssh_key_fingerprint "$host_key_file")"
+    printf '%s\n' "$scanned_key" > "${host_key_file}.scanned"
+    new_fingerprint="$(ssh_key_fingerprint "${host_key_file}.scanned")"
+
+    printf 'Egress SSH TUN host key\n'
+    printf '%s\n' '-----------------------'
+    printf 'Endpoint:    %s:%s\n' "$egress_ip" "$ssh_tun_port"
+    printf 'Current pin: %s\n' "$old_fingerprint"
+    printf 'Scanned key: %s\n' "$new_fingerprint"
+    printf '\n'
+
+    if [[ "$current_key" == "$scanned_key" ]]; then
+        rm -f "${host_key_file}.scanned"
+        printf 'Pinned key already matches the egress node. Deploying ingress to converge config.\n'
+        deploy_ingress_project
+        return $?
     fi
+
+    log::warn "The pinned egress SSH TUN host key differs from the live egress node."
+    prompt_yes_no answer "Update encrypted state with the scanned host key and deploy ingress?" "no"
+    if [[ "$answer" != "yes" ]]; then
+        rm -f "${host_key_file}.scanned"
+        log::warn "Host key pin was not changed."
+        return 1
+    fi
+
+    mv "${host_key_file}.scanned" "$host_key_file"
+    chmod 0644 "$host_key_file"
+    persist_vault || return $?
+    log::warn "Updated egress SSH TUN host key pin from ${egress_ip}:${ssh_tun_port}."
+    deploy_ingress_project
 }
 
 deploy_ingress_project() {
-    sync_egress_host_key || return $?
     ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
 }
 
@@ -2666,6 +2729,7 @@ show_operations_menu() {
         printf '%s7.%s %sAudit Docker images%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
         printf '%s8.%s %sBackup vault state%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
         printf '%s9.%s %sRestore vault state%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        printf '%s10.%s %sSync egress SSH host key pin%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
         ui_controls "yes" "yes"
         printf '%s?: %s' "$COLOR_LINE" "$COLOR_RESET"
         read -r choice || true
@@ -2716,6 +2780,14 @@ show_operations_menu() {
             9)
                 screen_prompt answer "Restore Vault State" "" "Archive path" "" "no" "no" "yes"
                 restore_state "$answer"
+                wait_action_return
+                ;;
+            10)
+                materialize_from_vault
+                set +e
+                sync_egress_host_key
+                set -e
+                lock_state
                 wait_action_return
                 ;;
             b|B|m|M)
@@ -3158,6 +3230,13 @@ case "${cmd}" in
     save-state)
         theme::init
         save_state
+        lock_state
+        ;;
+
+    sync-egress-host-key|repair-ssh-host-key)
+        theme::init
+        materialize_from_vault
+        sync_egress_host_key
         lock_state
         ;;
 
