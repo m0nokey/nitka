@@ -871,6 +871,27 @@ persist_vault() {
     vault_set_readonly
 }
 
+save_state() {
+    local group_vars_file="${tcp_dir}/group_vars/ingress.yml"
+    local saved_obfs_host saved_obfs_path
+
+    saved_obfs_host="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_host)"
+    saved_obfs_path="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_path)"
+
+    if [[ ! -f "${project_state}" ]]; then
+        materialize_from_vault
+    fi
+
+    if [[ -n "$saved_obfs_host" ]]; then
+        ingress_xray_obfs_host="$saved_obfs_host"
+    fi
+    if [[ -n "$saved_obfs_path" ]]; then
+        ingress_xray_obfs_path="$saved_obfs_path"
+    fi
+
+    persist_vault
+}
+
 materialize_from_vault() {
     local plain
     [[ -f "${vault_file}" ]] || return 0
@@ -3027,7 +3048,7 @@ case "${cmd}" in
 
     save-state)
         theme::init
-        persist_vault
+        save_state
         lock_state
         ;;
 
