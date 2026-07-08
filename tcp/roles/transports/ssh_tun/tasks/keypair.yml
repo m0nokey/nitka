@@ -25,6 +25,21 @@
       ssh-keygen -t ed25519 -N '' -f {{ ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key
       -C nitka-ssh-tun-server
     creates: "{{ ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key"
+  when: ssh_tun_endpoint == 'server'
+
+- name: Check SSH TUN server host private key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.stat:
+    path: "{{ ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key"
+  register: ssh_tun_host_private_key_stat
+
+- name: Check SSH TUN server host public key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.stat:
+    path: "{{ ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key.pub"
+  register: ssh_tun_host_public_key_stat
 
 - name: Set SSH TUN private key permissions
   delegate_to: localhost
@@ -46,6 +61,7 @@
   ansible.builtin.file:
     path: "{{ ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key"
     mode: "0600"
+  when: ssh_tun_host_private_key_stat.stat.exists
 
 - name: Set SSH TUN server host public key permissions
   delegate_to: localhost
@@ -53,3 +69,4 @@
   ansible.builtin.file:
     path: "{{ ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key.pub"
     mode: "0644"
+  when: ssh_tun_host_public_key_stat.stat.exists
