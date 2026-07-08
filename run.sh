@@ -898,6 +898,7 @@ persist_vault() {
 save_state() {
     local group_vars_file="${tcp_dir}/group_vars/ingress.yml"
     local saved_obfs_host saved_obfs_path
+    local should_refresh_group_vars="no"
 
     saved_obfs_host="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_host)"
     saved_obfs_path="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_path)"
@@ -910,9 +911,20 @@ save_state() {
 
     if [[ -n "$saved_obfs_host" ]]; then
         ingress_xray_obfs_host="$saved_obfs_host"
+        should_refresh_group_vars="yes"
     fi
     if [[ -n "$saved_obfs_path" ]]; then
         ingress_xray_obfs_path="$saved_obfs_path"
+        should_refresh_group_vars="yes"
+    fi
+
+    if [[ "$should_refresh_group_vars" == "yes" ]]; then
+        # shellcheck disable=SC1090
+        source "${project_state}"
+        [[ -n "$saved_obfs_host" ]] && ingress_xray_obfs_host="$saved_obfs_host"
+        [[ -n "$saved_obfs_path" ]] && ingress_xray_obfs_path="$saved_obfs_path"
+        write_project_state
+        refresh_group_vars_from_state
     fi
 
     persist_vault
