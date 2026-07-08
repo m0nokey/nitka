@@ -2,4 +2,5 @@
 ssh_tun_client_tun_mtu: 1200
 ssh_tun_client_log_level: QUIET
 ssh_tun_client_ipqos: throughput
+ssh_tun_network_vpn_client_cidr_ipv4: 10.11.12.2/30
 ssh_tun_tun_mtu: 1200

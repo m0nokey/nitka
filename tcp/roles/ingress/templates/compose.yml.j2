@@ -19,7 +19,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "sh -ec 'test \"$(cat /proc/1/comm)\" = ssh && ip route show | grep -q \"^default via 10.11.12.1 dev {{ ssh_tun_network_interface }}\"'",
+          "sh -ec 'test \"$(cat /proc/1/comm)\" = ssh && ip route show | grep -q \"^default via {{ ssh_tun_network_vpn_gateway_ipv4 }} dev {{ ssh_tun_network_interface }}\"'",
         ]
       interval: 30s
       timeout: 5s
@@ -28,7 +28,7 @@ services:
     volumes:
       - ./ssh_tun_client:/ssh:ro
     dns:
-      - 10.11.12.1
+      - {{ ssh_tun_network_vpn_gateway_ipv4 }}
     networks:
       - nitka_ingress
     logging:
