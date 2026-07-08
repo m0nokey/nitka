@@ -1,11 +1,11 @@
 [Unit]
-Description=Run ingress Docker namespace watchdog fallback timer
+Description=Run Nitka ingress Docker namespace watchdog fallback timer
 
 [Timer]
 OnBootSec=30s
 OnUnitActiveSec={{ ingress_watchdog_timer_interval | default('5min') }}
 AccuracySec=30s
-Unit=ingress-watchdog.service
+Unit=nitka-ingress-watchdog.service
 
 [Install]
 WantedBy=timers.target
