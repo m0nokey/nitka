@@ -248,8 +248,13 @@
     src: compose.yml.j2
     dest: "{{ ingress_remote_dir }}/compose.yml"
     mode: "0644"
-    validate: docker compose -f %s config -q
   notify: restart ingress stack
+
+- name: Validate rendered docker compose
+  become: true
+  ansible.builtin.command:
+    cmd: docker compose -f "{{ ingress_remote_dir }}/compose.yml" config -q
+  changed_when: false
 
 - name: Render clash config
   ansible.builtin.template:
