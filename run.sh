@@ -732,6 +732,26 @@ remove_project_state_keys() {
     chmod 0600 "${project_state}"
 }
 
+clean_scalar_value() {
+    local value="${1-}" previous
+    local i
+
+    for i in 1 2 3 4; do
+        previous="$value"
+        value="${value//\\\"/\"}"
+        value="${value//\\\'/\'}"
+        if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+        if [[ "$value" == \'*\' && "$value" == *\' ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+        [[ "$value" == "$previous" ]] && break
+    done
+
+    printf '%s\n' "$value"
+}
+
 write_project_state() {
     local tmp current_obfs_host current_obfs_path
     tmp="${project_state}.tmp.$$"
@@ -749,6 +769,8 @@ write_project_state() {
     fi
     current_obfs_host="${current_obfs_host:-example.com}"
     current_obfs_path="${current_obfs_path:-/}"
+    current_obfs_host="$(clean_scalar_value "$current_obfs_host")"
+    current_obfs_path="$(clean_scalar_value "$current_obfs_path")"
 
     {
         printf 'initialized_at=%s\n' "${initialized_at:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
@@ -793,6 +815,8 @@ sync_project_state_from_group_vars() {
 
     group_obfs_host="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_host)"
     group_obfs_path="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_path)"
+    group_obfs_host="$(clean_scalar_value "$group_obfs_host")"
+    group_obfs_path="$(clean_scalar_value "$group_obfs_path")"
 
     [[ -n "$group_obfs_host" || -n "$group_obfs_path" ]] || return 0
 
@@ -877,6 +901,8 @@ save_state() {
 
     saved_obfs_host="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_host)"
     saved_obfs_path="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_path)"
+    saved_obfs_host="$(clean_scalar_value "$saved_obfs_host")"
+    saved_obfs_path="$(clean_scalar_value "$saved_obfs_path")"
 
     if [[ ! -f "${project_state}" ]]; then
         materialize_from_vault
@@ -1407,6 +1433,8 @@ write_group_vars() {
     local obfs_path="${ingress_xray_obfs_path:-/}"
     local obfs_host_yaml obfs_path_yaml
 
+    obfs_host="$(clean_scalar_value "$obfs_host")"
+    obfs_path="$(clean_scalar_value "$obfs_path")"
     obfs_host_yaml="$(yaml_quote "$obfs_host")"
     obfs_path_yaml="$(yaml_quote "$obfs_path")"
 
