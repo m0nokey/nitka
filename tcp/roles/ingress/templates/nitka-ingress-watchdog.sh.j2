@@ -2,9 +2,12 @@
 set -eu
 
 compose_dir="{{ ingress_remote_dir }}"
-ssh_container="ssh_tun_client"
-clash_container="clashrs"
-xray_container="xray"
+ssh_service="ssh_tun_client"
+clash_service="clashrs"
+xray_service="xray"
+ssh_container="nitka-ssh-tun-client"
+clash_container="nitka-clashrs"
+xray_container="nitka-xray"
 clash_port="{{ ingress_clash_port }}"
 check_interval="{{ ingress_watchdog_interval_seconds | default(30) }}"
 
@@ -28,8 +31,8 @@ recreate_dependents() {
     reason="$1"
     log "recreating clashrs and xray: ${reason}"
     cd "$compose_dir"
-    docker rm -f clashrs xray >/dev/null 2>&1 || true
-    docker compose up -d --force-recreate --no-deps clashrs xray >/dev/null
+    docker rm -f "$clash_container" "$xray_container" >/dev/null 2>&1 || true
+    docker compose up -d --force-recreate --no-deps "$clash_service" "$xray_service" >/dev/null
 }
 
 check_once() {
@@ -76,7 +79,7 @@ check_once() {
     if ! is_running "$xray_container"; then
         cd "$compose_dir"
         log "${xray_container} is not running; starting it"
-        docker compose up -d xray >/dev/null
+        docker compose up -d "$xray_service" >/dev/null
     fi
 }
 
