@@ -4,7 +4,6 @@ set -eu
 cd "{{ audit_remote_dir }}"
 images="$(
     docker compose config --images 2>/dev/null || true
-    docker ps --format '{% raw %}{{.Image}}{% endraw %}' 2>/dev/null || true
 )"
 images="$(printf '%s\n' "$images" | awk 'NF && !seen[$0]++')"
 
