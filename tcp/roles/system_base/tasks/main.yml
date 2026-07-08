@@ -158,33 +158,9 @@
       APT::Periodic::Unattended-Upgrade "1";
   when: system_base_enable_os_updater | bool
 
-- name: Stop and disable legacy OS updater units
-  ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    enabled: false
-    state: stopped
-  loop:
-    - os-updater.timer
-    - os-updater.service
-  failed_when: false
-  when: system_base_enable_os_updater | bool
-
-- name: Remove legacy OS updater files
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /usr/local/sbin/os-updater
-    - /etc/systemd/system/os-updater.service
-    - /etc/systemd/system/os-updater.timer
-    - /etc/logrotate.d/os-updater
-    - /etc/logrotate.d/os_updater
-    - /etc/logrotate.d/apt-auto-upgrade
-  when: system_base_enable_os_updater | bool
-
 - name: Install OS updater script
   ansible.builtin.template:
-    src: os-updater.j2
+    src: nitka-os-updater.j2
     dest: /usr/local/sbin/nitka-os-updater
     owner: root
     group: root
@@ -193,7 +169,7 @@
 
 - name: Install OS updater service
   ansible.builtin.template:
-    src: os-updater.service.j2
+    src: nitka-os-updater.service.j2
     dest: /etc/systemd/system/nitka-os-updater.service
     owner: root
     group: root
@@ -203,7 +179,7 @@
 
 - name: Install OS updater timer
   ansible.builtin.template:
-    src: os-updater.timer.j2
+    src: nitka-os-updater.timer.j2
     dest: /etc/systemd/system/nitka-os-updater.timer
     owner: root
     group: root
@@ -213,7 +189,7 @@
 
 - name: Install OS updater logrotate config
   ansible.builtin.template:
-    src: os-updater.logrotate.j2
+    src: nitka-os-updater.logrotate.j2
     dest: /etc/logrotate.d/nitka-os-updater
     owner: root
     group: root
@@ -227,27 +203,6 @@
     state: started
     daemon_reload: "{{ system_base_os_updater_service.changed or system_base_os_updater_timer.changed }}"
   when: system_base_enable_os_updater | bool
-
-- name: Stop and disable legacy Docker project updater units
-  ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    enabled: false
-    state: stopped
-  loop:
-    - ingress-docker-updater.timer
-    - ingress-docker-updater.service
-  failed_when: false
-  when: system_base_enable_docker_updater | bool
-
-- name: Remove legacy Docker project updater files
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /usr/local/sbin/ingress-docker-updater
-    - /etc/systemd/system/ingress-docker-updater.service
-    - /etc/systemd/system/ingress-docker-updater.timer
-  when: system_base_enable_docker_updater | bool
 
 - name: Install Docker project updater script
   ansible.builtin.template:

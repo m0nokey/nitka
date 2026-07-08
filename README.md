@@ -460,9 +460,8 @@ This stops Compose only inside the configured project directories and removes:
 - `nitka-os-updater.service`
 - `nitka-os-updater.timer`
 - project Docker updater units
-- legacy Nitka unit names from earlier versions
 
-It does not stop or remove legacy stacks or unrelated Docker containers.
+It does not stop or remove unrelated Docker containers.
 
 ## System Base
 
