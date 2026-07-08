@@ -37,6 +37,32 @@ that is not listed in the routing policy exits normally through the local
 country. Only whitelist traffic is carried from ingress to egress over the
 transport layer and exits from the remote country.
 
+## Egress DNS
+
+The egress node also runs Unbound. It is used by the SSH TUN path as the remote
+DNS resolver and forwards queries to configured upstream DNS-over-TLS servers.
+
+Unbound can load RPZ blocklists on the egress side. RPZ is used as a DNS-level
+denylist layer for things such as malware domains, tracker domains, advertising
+domains, or unwanted encrypted-DNS endpoints. Matching domains are answered with
+`NXDOMAIN`.
+
+These lists are configured in:
+
+```text
+tcp/group_vars/egress.yml
+```
+
+Public examples only include placeholder RPZ sources:
+
+```text
+tcp/group_vars/egress.example.yml
+```
+
+Routing and DNS filtering are separate layers: routing decides whether traffic is
+`DIRECT` or `PROXY`, while egress Unbound applies DNS filtering only for traffic
+that uses the remote egress DNS path.
+
 ## Requirements
 
 Nitka runs from a local control machine and deploys two remote VPS nodes.
