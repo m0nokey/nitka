@@ -33,15 +33,15 @@
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": "{{ ingress_xray_obfs_host }}:443",
-          "serverNames": ["{{ ingress_xray_obfs_host }}"],
+          "target": {{ (ingress_xray_obfs_host ~ ':443') | to_json }},
+          "serverNames": [{{ ingress_xray_obfs_host | to_json }}],
           "privateKey": "{{ lookup('file', ingress_state_dir ~ '/reality_private_key') | trim }}",
           "shortIds": ["{{ ingress_xray_reality_short_id }}"],
           "xver": 0,
           "fingerprint": "chrome"
         },
         "xhttpSettings": {
-          "path": "{{ ingress_xray_obfs_path }}",
+          "path": {{ ingress_xray_obfs_path | to_json }},
           "mode": "packet-up"
         }
       },
@@ -71,8 +71,8 @@
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": "{{ ingress_xray_obfs_host }}:443",
-          "serverNames": ["{{ ingress_xray_obfs_host }}"],
+          "target": {{ (ingress_xray_obfs_host ~ ':443') | to_json }},
+          "serverNames": [{{ ingress_xray_obfs_host | to_json }}],
           "privateKey": "{{ lookup('file', ingress_state_dir ~ '/reality_private_key') | trim }}",
           "shortIds": ["{{ ingress_xray_reality_short_id }}"],
           "xver": 0,
