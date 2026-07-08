@@ -17,13 +17,13 @@ RUN apk add --no-cache \
 RUN install -D -m 0755 -o root -g root /dev/stdin /usr/local/bin/healthcheck <<'EOS'
 #!/bin/sh
 set -eu
-: "${NETWORK_VPN_INTERFACE:?}"
-: "${NETWORK_VPN_GATEWAY_CIDR_IPV4:?}"
-: "${NETWORK_VPN_SUBNET_CIDR_IPV4:?}"
+: "${network_vpn_interface:?}"
+: "${network_vpn_gateway_cidr_ipv4:?}"
+: "${network_vpn_subnet_cidr_ipv4:?}"
 ss -ltn "( sport = :22 )" >/dev/null 2>&1 || exit 1
-ip addr show "${NETWORK_VPN_INTERFACE}" >/dev/null 2>&1 || exit 1
-ip addr show "${NETWORK_VPN_INTERFACE}" | grep -q "${NETWORK_VPN_GATEWAY_CIDR_IPV4}" || exit 1
-ip route show | grep -q "${NETWORK_VPN_SUBNET_CIDR_IPV4}" || exit 1
+ip addr show "${network_vpn_interface}" >/dev/null 2>&1 || exit 1
+ip addr show "${network_vpn_interface}" | grep -q "${network_vpn_gateway_cidr_ipv4}" || exit 1
+ip route show | grep -q "${network_vpn_subnet_cidr_ipv4}" || exit 1
 exit 0
 EOS
 
@@ -31,13 +31,13 @@ RUN install -D -m 0755 -o root -g root /dev/stdin /usr/local/bin/vpn <<'EOS'
 #!/bin/sh
 set -eu
 
-: "${VPN_USERNAME:?}"
-: "${USER_GROUP:?}"
-: "${NETWORK_CONTAINER_VPN_IPV4:?}"
-: "${NETWORK_VPN_GATEWAY_CIDR_IPV4:?}"
-: "${NETWORK_VPN_INTERFACE:?}"
-: "${NETWORK_VPN_SUBNET_CIDR_IPV4:?}"
-: "${VPN_TUN_MTU:=1200}"
+: "${vpn_username:?}"
+: "${user_group:?}"
+: "${network_container_vpn_ipv4:?}"
+: "${network_vpn_gateway_cidr_ipv4:?}"
+: "${network_vpn_interface:?}"
+: "${network_vpn_subnet_cidr_ipv4:?}"
+: "${vpn_tun_mtu:=1200}"
 
 authorized_keys_src="/run/nitka/authorized_keys"
 
@@ -46,13 +46,13 @@ authorized_keys_src="/run/nitka/authorized_keys"
     exit 1
 }
 
-getent group "$USER_GROUP" >/dev/null 2>&1 || groupadd "$USER_GROUP"
-id "$VPN_USERNAME" >/dev/null 2>&1 || useradd -M -s /sbin/nologin -g "$USER_GROUP" "$VPN_USERNAME"
-usermod -p '*' "$VPN_USERNAME"
-usermod -aG "$USER_GROUP" "$VPN_USERNAME"
+getent group "$user_group" >/dev/null 2>&1 || groupadd "$user_group"
+id "$vpn_username" >/dev/null 2>&1 || useradd -M -s /sbin/nologin -g "$user_group" "$vpn_username"
+usermod -p '*' "$vpn_username"
+usermod -aG "$user_group" "$vpn_username"
 
-install -d -m 0700 -o "$VPN_USERNAME" -g "$USER_GROUP" "/var/ssh/$VPN_USERNAME"
-install -m 0600 -o "$VPN_USERNAME" -g "$USER_GROUP" "$authorized_keys_src" "/var/ssh/$VPN_USERNAME/authorized_keys"
+install -d -m 0700 -o "$vpn_username" -g "$user_group" "/var/ssh/$vpn_username"
+install -m 0600 -o "$vpn_username" -g "$user_group" "$authorized_keys_src" "/var/ssh/$vpn_username/authorized_keys"
 install -d -m 0755 -o root -g root /run/sshd
 [ -s /etc/ssh/ssh_host_ed25519_key ] || {
     echo "missing /etc/ssh/ssh_host_ed25519_key" >&2
@@ -62,7 +62,7 @@ install -d -m 0755 -o root -g root /run/sshd
 cat > /etc/ssh/sshd_config <<CONF
 Protocol 2
 MaxSessions 2
-ListenAddress ${NETWORK_CONTAINER_VPN_IPV4}:22
+ListenAddress ${network_container_vpn_ipv4}:22
 PermitRootLogin no
 PermitTunnel yes
 Compression no
@@ -71,7 +71,7 @@ PasswordAuthentication no
 LoginGraceTime 10
 IgnoreRhosts yes
 HostbasedAuthentication no
-AllowGroups ${USER_GROUP}
+AllowGroups ${user_group}
 PermitOpen none
 MaxAuthTries 3
 StrictModes yes
@@ -104,15 +104,15 @@ SyslogFacility AUTHPRIV
 Subsystem sftp /bin/false
 CONF
 
-ip link show "${NETWORK_VPN_INTERFACE}" >/dev/null 2>&1 || ip tuntap add dev "${NETWORK_VPN_INTERFACE}" mode tun user "${VPN_USERNAME}"
-ip addr flush dev "${NETWORK_VPN_INTERFACE}" >/dev/null 2>&1 || true
-ip addr add "${NETWORK_VPN_GATEWAY_CIDR_IPV4}" dev "${NETWORK_VPN_INTERFACE}"
-ip link set dev "${NETWORK_VPN_INTERFACE}" up mtu "${VPN_TUN_MTU}"
-iptables -t nat -C POSTROUTING -s "${NETWORK_VPN_SUBNET_CIDR_IPV4}" ! -o "${NETWORK_VPN_INTERFACE}" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s "${NETWORK_VPN_SUBNET_CIDR_IPV4}" ! -o "${NETWORK_VPN_INTERFACE}" -j MASQUERADE
-iptables -C FORWARD -i "${NETWORK_VPN_INTERFACE}" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "${NETWORK_VPN_INTERFACE}" -j ACCEPT
-iptables -C FORWARD -o "${NETWORK_VPN_INTERFACE}" -j ACCEPT 2>/dev/null || iptables -A FORWARD -o "${NETWORK_VPN_INTERFACE}" -j ACCEPT
-iptables -t mangle -C FORWARD -o "${NETWORK_VPN_INTERFACE}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -o "${NETWORK_VPN_INTERFACE}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-iptables -t mangle -C FORWARD -i "${NETWORK_VPN_INTERFACE}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -i "${NETWORK_VPN_INTERFACE}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+ip link show "${network_vpn_interface}" >/dev/null 2>&1 || ip tuntap add dev "${network_vpn_interface}" mode tun user "${vpn_username}"
+ip addr flush dev "${network_vpn_interface}" >/dev/null 2>&1 || true
+ip addr add "${network_vpn_gateway_cidr_ipv4}" dev "${network_vpn_interface}"
+ip link set dev "${network_vpn_interface}" up mtu "${vpn_tun_mtu}"
+iptables -t nat -C POSTROUTING -s "${network_vpn_subnet_cidr_ipv4}" ! -o "${network_vpn_interface}" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s "${network_vpn_subnet_cidr_ipv4}" ! -o "${network_vpn_interface}" -j MASQUERADE
+iptables -C FORWARD -i "${network_vpn_interface}" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "${network_vpn_interface}" -j ACCEPT
+iptables -C FORWARD -o "${network_vpn_interface}" -j ACCEPT 2>/dev/null || iptables -A FORWARD -o "${network_vpn_interface}" -j ACCEPT
+iptables -t mangle -C FORWARD -o "${network_vpn_interface}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -o "${network_vpn_interface}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables -t mangle -C FORWARD -i "${network_vpn_interface}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -i "${network_vpn_interface}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
 exec /usr/sbin/sshd -D
 EOS
