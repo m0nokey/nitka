@@ -732,11 +732,22 @@ remove_project_state_keys() {
 }
 
 write_project_state() {
-    local tmp
+    local tmp current_obfs_host current_obfs_path
     tmp="${project_state}.tmp.$$"
     mkdir -p "$(dirname -- "${project_state}")"
     : > "$tmp"
     chmod 0600 "$tmp"
+
+    current_obfs_host="${ingress_xray_obfs_host:-}"
+    current_obfs_path="${ingress_xray_obfs_path:-}"
+    if [[ -z "$current_obfs_host" && -f "${tcp_dir}/group_vars/ingress.yml" ]]; then
+        current_obfs_host="$(last_group_var_value "${tcp_dir}/group_vars/ingress.yml" ingress_xray_obfs_host)"
+    fi
+    if [[ -z "$current_obfs_path" && -f "${tcp_dir}/group_vars/ingress.yml" ]]; then
+        current_obfs_path="$(last_group_var_value "${tcp_dir}/group_vars/ingress.yml" ingress_xray_obfs_path)"
+    fi
+    current_obfs_host="${current_obfs_host:-example.com}"
+    current_obfs_path="${current_obfs_path:-/}"
 
     {
         printf 'initialized_at=%s\n' "${initialized_at:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
@@ -757,6 +768,8 @@ write_project_state() {
         printf 'ssh_tun_port=%s\n' "${ssh_tun_port}"
         printf 'xhttp_port=%s\n' "${xhttp_port}"
         printf 'reality_port=%s\n' "${reality_port}"
+        printf 'ingress_xray_obfs_host=%s\n' "$(shell_quote "${current_obfs_host}")"
+        printf 'ingress_xray_obfs_path=%s\n' "$(shell_quote "${current_obfs_path}")"
         printf 'ingress_management_user=%s\n' "${ingress_management_user:-ingress}"
         printf 'ingress_management_port=%s\n' "${ingress_management_port:-$ingress_initial_port}"
         printf 'ingress_sshd_port=%s\n' "${ingress_sshd_port:-$ingress_initial_port}"
@@ -771,6 +784,30 @@ write_project_state() {
     chmod 0600 "${project_state}"
 }
 
+sync_project_state_from_group_vars() {
+    local group_vars_file="${tcp_dir}/group_vars/ingress.yml"
+    local group_obfs_host group_obfs_path
+
+    [[ -f "${project_state}" && -f "$group_vars_file" ]] || return 0
+
+    group_obfs_host="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_host)"
+    group_obfs_path="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_path)"
+
+    [[ -n "$group_obfs_host" || -n "$group_obfs_path" ]] || return 0
+
+    # shellcheck disable=SC1090
+    source "${project_state}"
+
+    if [[ -n "$group_obfs_host" ]]; then
+        ingress_xray_obfs_host="$group_obfs_host"
+    fi
+    if [[ -n "$group_obfs_path" ]]; then
+        ingress_xray_obfs_path="$group_obfs_path"
+    fi
+
+    write_project_state
+}
+
 persist_vault() {
     local plain encrypted_tmp
     plain="$(vault_plain_path)"
@@ -781,6 +818,7 @@ persist_vault() {
     chmod 0600 "$plain"
 
     require_file "${project_state}"
+    sync_project_state_from_group_vars
     write_secret_var "$plain" "project_env_b64" "$(b64_file "${project_state}")"
 
     for item in \
@@ -1343,6 +1381,12 @@ write_group_vars() {
     local ssh_tun_port="$3"
     local xhttp_port="$4"
     local reality_port="$5"
+    local obfs_host="${ingress_xray_obfs_host:-example.com}"
+    local obfs_path="${ingress_xray_obfs_path:-/}"
+    local obfs_host_yaml obfs_path_yaml
+
+    obfs_host_yaml="$(yaml_quote "$obfs_host")"
+    obfs_path_yaml="$(yaml_quote "$obfs_path")"
 
     mkdir -p "${tcp_dir}/group_vars"
     : > "${tcp_dir}/group_vars/ingress.yml"
@@ -1364,8 +1408,8 @@ ingress_xray_xhttp_port: ${xhttp_port}
 ingress_xray_reality_port_min: 20000
 ingress_xray_reality_port_max: 60000
 ingress_xray_reality_port: ${reality_port}
-ingress_xray_obfs_host: example.com
-ingress_xray_obfs_path: /
+ingress_xray_obfs_host: ${obfs_host_yaml}
+ingress_xray_obfs_path: ${obfs_path_yaml}
 ingress_xray_xhttp_remarks: vless-xhttp-reality
 ingress_xray_reality_remarks: vless-reality-vision
 
