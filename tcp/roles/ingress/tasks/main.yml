@@ -279,37 +279,16 @@
 - name: Render ingress watchdog script
   become: true
   ansible.builtin.template:
-    src: ingress_watchdog.sh.j2
+    src: nitka-ingress-watchdog.sh.j2
     dest: /usr/local/sbin/nitka-ingress-watchdog
     owner: root
     group: root
     mode: "0755"
 
-- name: Stop and disable legacy ingress watchdog units
-  become: true
-  ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    enabled: false
-    state: stopped
-  loop:
-    - ingress-watchdog.timer
-    - ingress-watchdog.service
-  failed_when: false
-
-- name: Remove legacy ingress watchdog files
-  become: true
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /usr/local/sbin/ingress_watchdog
-    - /etc/systemd/system/ingress-watchdog.service
-    - /etc/systemd/system/ingress-watchdog.timer
-
 - name: Render ingress watchdog service
   become: true
   ansible.builtin.template:
-    src: ingress-watchdog.service.j2
+    src: nitka-ingress-watchdog.service.j2
     dest: /etc/systemd/system/nitka-ingress-watchdog.service
     owner: root
     group: root
@@ -319,7 +298,7 @@
 - name: Render ingress watchdog timer
   become: true
   ansible.builtin.template:
-    src: ingress-watchdog.timer.j2
+    src: nitka-ingress-watchdog.timer.j2
     dest: /etc/systemd/system/nitka-ingress-watchdog.timer
     owner: root
     group: root

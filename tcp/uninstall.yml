@@ -13,8 +13,6 @@
       loop:
         - nitka-ingress-watchdog.timer
         - nitka-ingress-watchdog.service
-        - ingress-watchdog.timer
-        - ingress-watchdog.service
       failed_when: false
 
     - name: Stop ingress OS updater units
@@ -25,8 +23,6 @@
       loop:
         - nitka-os-updater.timer
         - nitka-os-updater.service
-        - os-updater.timer
-        - os-updater.service
       failed_when: false
 
     - name: Stop ingress docker updater units
@@ -37,8 +33,6 @@
       loop:
         - nitka-ingress-docker-updater.timer
         - nitka-ingress-docker-updater.service
-        - ingress-docker-updater.timer
-        - ingress-docker-updater.service
       failed_when: false
 
     - name: Stop only this ingress compose project
@@ -54,26 +48,16 @@
         state: absent
       loop:
         - "{{ ingress_remote_dir }}"
-        - /usr/local/sbin/ingress_watchdog
         - /usr/local/sbin/nitka-ingress-watchdog
         - /usr/local/sbin/ingress_stack_ensure
-        - /usr/local/sbin/ingress-docker-updater
         - /usr/local/sbin/nitka-ingress-docker-updater
-        - /usr/local/sbin/os-updater
         - /usr/local/sbin/nitka-os-updater
-        - /etc/systemd/system/ingress-watchdog.service
-        - /etc/systemd/system/ingress-watchdog.timer
         - /etc/systemd/system/nitka-ingress-watchdog.service
         - /etc/systemd/system/nitka-ingress-watchdog.timer
-        - /etc/systemd/system/ingress-docker-updater.service
-        - /etc/systemd/system/ingress-docker-updater.timer
         - /etc/systemd/system/nitka-ingress-docker-updater.service
         - /etc/systemd/system/nitka-ingress-docker-updater.timer
-        - /etc/systemd/system/os-updater.service
-        - /etc/systemd/system/os-updater.timer
         - /etc/systemd/system/nitka-os-updater.service
         - /etc/systemd/system/nitka-os-updater.timer
-        - /etc/logrotate.d/os-updater
         - /etc/logrotate.d/nitka-os-updater
 
     - name: Reload systemd after ingress removal
@@ -108,8 +92,6 @@
       loop:
         - nitka-os-updater.timer
         - nitka-os-updater.service
-        - os-updater.timer
-        - os-updater.service
       failed_when: false
 
     - name: Stop only this egress compose project
@@ -126,15 +108,11 @@
       loop:
         - "{{ egress_remote_dir }}"
         - /usr/local/sbin/nitka-egress-docker-updater
-        - /usr/local/sbin/os-updater
         - /usr/local/sbin/nitka-os-updater
         - /etc/systemd/system/nitka-egress-docker-updater.service
         - /etc/systemd/system/nitka-egress-docker-updater.timer
-        - /etc/systemd/system/os-updater.service
-        - /etc/systemd/system/os-updater.timer
         - /etc/systemd/system/nitka-os-updater.service
         - /etc/systemd/system/nitka-os-updater.timer
-        - /etc/logrotate.d/os-updater
         - /etc/logrotate.d/nitka-os-updater
 
     - name: Reload systemd after egress removal
