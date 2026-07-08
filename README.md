@@ -455,9 +455,12 @@ This stops Compose only inside the configured project directories and removes:
 
 - `ingress_remote_dir`
 - `egress_remote_dir`
-- `ingress-watchdog.service`
-- `ingress-watchdog.timer`
-- `/usr/local/sbin/ingress_watchdog`
+- `nitka-ingress-watchdog.service`
+- `nitka-ingress-watchdog.timer`
+- `nitka-os-updater.service`
+- `nitka-os-updater.timer`
+- project Docker updater units
+- legacy Nitka unit names from earlier versions
 
 It does not stop or remove legacy stacks or unrelated Docker containers.
 
@@ -468,7 +471,7 @@ The `system_base` role prepares each Debian node before deploying the stack:
 - configures Debian and Docker apt sources
 - installs Docker CE and the Docker Compose plugin
 - sets timezone to UTC
-- enables a kernel-aware `os-updater.timer`
+- enables a kernel-aware `nitka-os-updater.timer`
 - enables a project-specific Docker updater timer
 
 The Docker updater is service-aware:

@@ -280,16 +280,37 @@
   become: true
   ansible.builtin.template:
     src: ingress_watchdog.sh.j2
-    dest: /usr/local/sbin/ingress_watchdog
+    dest: /usr/local/sbin/nitka-ingress-watchdog
     owner: root
     group: root
     mode: "0755"
+
+- name: Stop and disable legacy ingress watchdog units
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - ingress-watchdog.timer
+    - ingress-watchdog.service
+  failed_when: false
+
+- name: Remove legacy ingress watchdog files
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /usr/local/sbin/ingress_watchdog
+    - /etc/systemd/system/ingress-watchdog.service
+    - /etc/systemd/system/ingress-watchdog.timer
 
 - name: Render ingress watchdog service
   become: true
   ansible.builtin.template:
     src: ingress-watchdog.service.j2
-    dest: /etc/systemd/system/ingress-watchdog.service
+    dest: /etc/systemd/system/nitka-ingress-watchdog.service
     owner: root
     group: root
     mode: "0644"
@@ -299,7 +320,7 @@
   become: true
   ansible.builtin.template:
     src: ingress-watchdog.timer.j2
-    dest: /etc/systemd/system/ingress-watchdog.timer
+    dest: /etc/systemd/system/nitka-ingress-watchdog.timer
     owner: root
     group: root
     mode: "0644"
@@ -317,14 +338,14 @@
 - name: Stop and disable ingress watchdog timer before stack changes
   become: true
   ansible.builtin.command:
-    cmd: systemctl disable --now ingress-watchdog.timer
+    cmd: systemctl disable --now nitka-ingress-watchdog.timer
   changed_when: false
   failed_when: false
 
 - name: Mask ingress watchdog timer before stack changes
   become: true
   ansible.builtin.command:
-    cmd: systemctl mask ingress-watchdog.timer
+    cmd: systemctl mask nitka-ingress-watchdog.timer
   changed_when: false
   failed_when: false
 
@@ -336,7 +357,7 @@
 - name: Stop ingress watchdog service before stack changes
   become: true
   ansible.builtin.systemd_service:
-    name: ingress-watchdog.service
+    name: nitka-ingress-watchdog.service
     state: stopped
   failed_when: false
 
@@ -388,7 +409,7 @@
 - name: Keep ingress watchdog timer masked and stopped
   become: true
   ansible.builtin.command:
-    cmd: systemctl mask --now ingress-watchdog.timer
+    cmd: systemctl mask --now nitka-ingress-watchdog.timer
   changed_when: false
   failed_when: false
 
@@ -400,7 +421,7 @@
 - name: Enable ingress watchdog service
   become: true
   ansible.builtin.systemd_service:
-    name: ingress-watchdog.service
+    name: nitka-ingress-watchdog.service
     enabled: true
     state: "{{ 'restarted' if (ingress_watchdog_service.changed or ingress_watchdog_timer.changed) else 'started' }}"
 

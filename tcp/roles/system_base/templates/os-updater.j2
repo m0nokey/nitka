@@ -7,7 +7,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 LOG=/var/log/nitka-os-updater.log
 exec > >(tee -a "$LOG") 2>&1
 
-exec 9>/run/os-updater.lock
+exec 9>/run/nitka-os-updater.lock
 if ! flock -n 9; then
     echo "[INFO] another apt run in progress, exiting"
     exit 0

@@ -9,7 +9,7 @@ clash_port="{{ ingress_clash_port }}"
 check_interval="{{ ingress_watchdog_interval_seconds | default(30) }}"
 
 log() {
-    logger -t ingress-watchdog "$*"
+    logger -t nitka-ingress-watchdog "$*"
 }
 
 is_running() {

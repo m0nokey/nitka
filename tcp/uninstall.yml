@@ -5,32 +5,40 @@
   vars_files:
     - group_vars/ingress.yml
   tasks:
-    - name: Stop ingress watchdog timer
+    - name: Stop ingress watchdog units
       ansible.builtin.systemd_service:
-        name: ingress-watchdog.timer
+        name: "{{ item }}"
         state: stopped
         enabled: false
+      loop:
+        - nitka-ingress-watchdog.timer
+        - nitka-ingress-watchdog.service
+        - ingress-watchdog.timer
+        - ingress-watchdog.service
       failed_when: false
 
-    - name: Stop ingress watchdog service
+    - name: Stop ingress OS updater units
       ansible.builtin.systemd_service:
-        name: ingress-watchdog.service
+        name: "{{ item }}"
         state: stopped
         enabled: false
+      loop:
+        - nitka-os-updater.timer
+        - nitka-os-updater.service
+        - os-updater.timer
+        - os-updater.service
       failed_when: false
 
-    - name: Stop ingress docker updater timer
+    - name: Stop ingress docker updater units
       ansible.builtin.systemd_service:
-        name: nitka-ingress-docker-updater.timer
+        name: "{{ item }}"
         state: stopped
         enabled: false
-      failed_when: false
-
-    - name: Stop ingress docker updater service
-      ansible.builtin.systemd_service:
-        name: nitka-ingress-docker-updater.service
-        state: stopped
-        enabled: false
+      loop:
+        - nitka-ingress-docker-updater.timer
+        - nitka-ingress-docker-updater.service
+        - ingress-docker-updater.timer
+        - ingress-docker-updater.service
       failed_when: false
 
     - name: Stop only this ingress compose project
@@ -47,12 +55,26 @@
       loop:
         - "{{ ingress_remote_dir }}"
         - /usr/local/sbin/ingress_watchdog
+        - /usr/local/sbin/nitka-ingress-watchdog
         - /usr/local/sbin/ingress_stack_ensure
+        - /usr/local/sbin/ingress-docker-updater
         - /usr/local/sbin/nitka-ingress-docker-updater
+        - /usr/local/sbin/os-updater
+        - /usr/local/sbin/nitka-os-updater
         - /etc/systemd/system/ingress-watchdog.service
         - /etc/systemd/system/ingress-watchdog.timer
+        - /etc/systemd/system/nitka-ingress-watchdog.service
+        - /etc/systemd/system/nitka-ingress-watchdog.timer
+        - /etc/systemd/system/ingress-docker-updater.service
+        - /etc/systemd/system/ingress-docker-updater.timer
         - /etc/systemd/system/nitka-ingress-docker-updater.service
         - /etc/systemd/system/nitka-ingress-docker-updater.timer
+        - /etc/systemd/system/os-updater.service
+        - /etc/systemd/system/os-updater.timer
+        - /etc/systemd/system/nitka-os-updater.service
+        - /etc/systemd/system/nitka-os-updater.timer
+        - /etc/logrotate.d/os-updater
+        - /etc/logrotate.d/nitka-os-updater
 
     - name: Reload systemd after ingress removal
       ansible.builtin.systemd_service:
@@ -78,6 +100,18 @@
         enabled: false
       failed_when: false
 
+    - name: Stop egress OS updater units
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - nitka-os-updater.timer
+        - nitka-os-updater.service
+        - os-updater.timer
+        - os-updater.service
+      failed_when: false
+
     - name: Stop only this egress compose project
       ansible.builtin.command:
         cmd: docker compose down --remove-orphans
@@ -92,8 +126,16 @@
       loop:
         - "{{ egress_remote_dir }}"
         - /usr/local/sbin/nitka-egress-docker-updater
+        - /usr/local/sbin/os-updater
+        - /usr/local/sbin/nitka-os-updater
         - /etc/systemd/system/nitka-egress-docker-updater.service
         - /etc/systemd/system/nitka-egress-docker-updater.timer
+        - /etc/systemd/system/os-updater.service
+        - /etc/systemd/system/os-updater.timer
+        - /etc/systemd/system/nitka-os-updater.service
+        - /etc/systemd/system/nitka-os-updater.timer
+        - /etc/logrotate.d/os-updater
+        - /etc/logrotate.d/nitka-os-updater
 
     - name: Reload systemd after egress removal
       ansible.builtin.systemd_service:
