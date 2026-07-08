@@ -3,8 +3,8 @@ set -eu
 
 : "${network_vpn_interface:?}"
 : "${network_vpn_server_ipv4:?}"
-: "${network_vpn_gateway_ipv4:=10.11.12.1}"
-: "${network_vpn_client_cidr_ipv4:=10.11.12.2/30}"
+: "${network_vpn_gateway_ipv4:?}"
+: "${network_vpn_client_cidr_ipv4:?}"
 : "${network_vpn_mtu:=1200}"
 
 configure_dns() {

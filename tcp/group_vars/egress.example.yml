@@ -12,6 +12,7 @@ ssh_tun_network_container_gateway_ipv4: 172.29.113.1
 ssh_tun_network_container_vpn_ipv4: 172.29.113.2
 ssh_tun_network_vpn_gateway_ipv4: 10.11.12.1
 ssh_tun_network_vpn_gateway_cidr_ipv4: 10.11.12.1/30
+ssh_tun_network_vpn_client_cidr_ipv4: 10.11.12.2/30
 
 system_base_docker_updater_calendar: "*-*-* 02:00"
 system_base_docker_updater_services:
