@@ -900,12 +900,17 @@ persist_vault() {
 save_state() {
     local group_vars_file="${tcp_dir}/group_vars/ingress.yml"
     local saved_obfs_host saved_obfs_path
+    local host_private_key_file="${generated_dir}/egress/ssh/ssh_host_ed25519_key"
+    local host_public_key_file="${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
+    local saved_host_private_key="" saved_host_public_key=""
     local should_refresh_group_vars="no"
 
     saved_obfs_host="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_host)"
     saved_obfs_path="$(last_group_var_value "$group_vars_file" ingress_xray_obfs_path)"
     saved_obfs_host="$(clean_scalar_value "$saved_obfs_host")"
     saved_obfs_path="$(clean_scalar_value "$saved_obfs_path")"
+    [[ -f "$host_private_key_file" ]] && saved_host_private_key="$(cat "$host_private_key_file")"
+    [[ -f "$host_public_key_file" ]] && saved_host_public_key="$(cat "$host_public_key_file")"
 
     if [[ ! -f "${project_state}" ]]; then
         materialize_from_vault
@@ -927,6 +932,17 @@ save_state() {
         [[ -n "$saved_obfs_path" ]] && ingress_xray_obfs_path="$saved_obfs_path"
         write_project_state
         refresh_group_vars_from_state
+    fi
+
+    if [[ -n "$saved_host_private_key" ]]; then
+        mkdir -p "$(dirname -- "$host_private_key_file")"
+        printf '%s\n' "$saved_host_private_key" > "$host_private_key_file"
+        chmod 0600 "$host_private_key_file"
+    fi
+    if [[ -n "$saved_host_public_key" ]]; then
+        mkdir -p "$(dirname -- "$host_public_key_file")"
+        printf '%s\n' "$saved_host_public_key" > "$host_public_key_file"
+        chmod 0644 "$host_public_key_file"
     fi
 
     persist_vault
