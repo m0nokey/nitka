@@ -855,6 +855,8 @@ persist_vault() {
         "management_egress_public_key:${generated_dir}/management/egress/id_ed25519.pub" \
         "ssh_tun_private_key_b64:${generated_dir}/egress/ssh/id_ed25519" \
         "ssh_tun_public_key:${generated_dir}/egress/ssh/id_ed25519.pub" \
+        "ssh_tun_host_private_key_b64:${generated_dir}/egress/ssh/ssh_host_ed25519_key" \
+        "ssh_tun_host_public_key:${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub" \
         "xray_xhttp_uuid:${generated_dir}/ingress/state/xhttp_uuid" \
         "xray_reality_uuid:${generated_dir}/ingress/state/reality_uuid" \
         "xray_xhttp_port:${generated_dir}/ingress/state/xhttp_port" \
@@ -961,6 +963,12 @@ materialize_from_vault() {
         mkdir -p "${generated_dir}/egress/ssh"
         printf '%s\n' "$ssh_tun_public_key" > "${generated_dir}/egress/ssh/id_ed25519.pub"
         chmod 0644 "${generated_dir}/egress/ssh/id_ed25519.pub"
+    fi
+    [[ -n "${ssh_tun_host_private_key_b64:-}" ]] && write_b64_file "$ssh_tun_host_private_key_b64" "${generated_dir}/egress/ssh/ssh_host_ed25519_key" 0600
+    if [[ -n "${ssh_tun_host_public_key:-}" ]]; then
+        mkdir -p "${generated_dir}/egress/ssh"
+        printf '%s\n' "$ssh_tun_host_public_key" > "${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
+        chmod 0644 "${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
     fi
     mkdir -p "${generated_dir}/ingress/state"
     for pair in \
