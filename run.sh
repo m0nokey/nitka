@@ -649,11 +649,11 @@ ensure_vault_password_file() {
         return 0
     fi
 
-    vault_body="Create a password to encrypt local generated state.\nVault file:\n  ${vault_file}"
-
     if [[ -f "${vault_file}" ]]; then
+        vault_body="Unlock encrypted local state.\nVault file:\n  ${vault_file}"
         screen_prompt vault_password "Encrypted State" "$vault_body" "Enter Vault password" "" "no" "yes" "no"
     else
+        vault_body="Create a password to encrypt local generated state.\nVault file:\n  ${vault_file}"
         while true; do
             screen_prompt vault_password "Encrypted State" "$vault_body" "Create Vault password" "" "no" "yes" "no"
             status=0
