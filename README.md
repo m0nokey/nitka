@@ -6,24 +6,30 @@ Project uses two VPS nodes with separate roles. `ingress` receives the client
 connection and applies routing rules. `egress` is the remote exit node and DNS
 resolver. The current transport between nodes is `SSH TUN`.
 
-```mermaid
-flowchart LR
-    C[Client<br/>Shadowrocket iOS / macOS]
-
-    subgraph L[local country]
-        I[ingress VPS<br/>Xray<br/>routing rules]
-        LN[Internet<br/>local exit]
-    end
-
-    subgraph R[remote country]
-        E[egress VPS<br/>SSH TUN server<br/>Unbound DNS]
-        RN[Internet<br/>remote exit]
-    end
-
-    C --> I
-    I -->|DIRECT by default<br/>all non-listed traffic| LN
-    I -->|PROXY whitelist<br/>SSH TUN transport| E
-    E --> RN
+```text
+Client
+  |
+  v
++------------------------------+
+| VPS [ingress node]           |
+| local country                |
+| Xray + whitelist routing     |
++---------------+--------------+
+                |
+                +-- DIRECT by default --> Internet [local exit]
+                |
+                `-- PROXY whitelist
+                    SSH TUN transport
+                    |
+                    v
+              +------------------------------+
+              | VPS [egress node]            |
+              | remote country               |
+              | SSH TUN server + Unbound DNS |
+              +---------------+--------------+
+                              |
+                              v
+                    Internet [remote exit]
 ```
 
 The scheme is designed to avoid a full-tunnel VPN mode on the client. Traffic is
