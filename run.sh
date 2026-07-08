@@ -294,6 +294,7 @@ usage() {
     usage_item "--rekey" "Change the password for the encrypted Vault state."
     usage_item "--uninstall" "Remove only this project from both nodes."
     usage_item "--lock" "Remove local decrypted/materialized cache."
+    usage_item "--save-state" "Encrypt current local materialized config into the Vault."
     usage_item "--backup-state [path]" "Archive the encrypted Vault file for transfer and restore."
     usage_item "--restore-state <archive>" "Restore the encrypted Vault file from a backup archive."
     usage_item "--state-path" "Show encrypted state path."
@@ -3021,6 +3022,12 @@ case "${cmd}" in
 
     lock)
         theme::init
+        lock_state
+        ;;
+
+    save-state)
+        theme::init
+        persist_vault
         lock_state
         ;;
 
