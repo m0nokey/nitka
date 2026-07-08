@@ -1870,7 +1870,17 @@ write_management_inventory_with_ports() {
 last_group_var_value() {
     local file="$1"
     local key="$2"
-    awk -F': *' -v key="$key" '$1 == key { value=$2 } END { if (value != "") print value }' "$file" 2>/dev/null || true
+    awk -F': *' -v key="$key" '
+        $1 == key {
+            value = $2
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            if (value ~ /^".*"$/ || value ~ /^\047.*\047$/) {
+                value = substr(value, 2, length(value) - 2)
+            }
+        }
+        END { if (value != "") print value }
+    ' "$file" 2>/dev/null || true
 }
 
 try_management_port() {
