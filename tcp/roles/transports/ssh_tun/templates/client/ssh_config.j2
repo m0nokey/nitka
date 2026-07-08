@@ -14,8 +14,7 @@ Host proxy
     MACs hmac-sha2-512-etm@openssh.com
     KexAlgorithms mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com
     ExitOnForwardFailure yes
-    StrictHostKeyChecking yes
-    UpdateHostKeys no
-    UserKnownHostsFile /ssh/known_hosts
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
     Tunnel yes
     TunnelDevice {{ ssh_tun_device_number }}:{{ ssh_tun_device_number }}
