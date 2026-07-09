@@ -12,15 +12,12 @@ services:
       - NET_ADMIN
       - NET_RAW
       - SYS_ADMIN
-    security_opt:
-      - no-new-privileges:true
     devices:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - ./ssh_tun_server/authorized_keys:/run/nitka/authorized_keys:ro
       - ./ssh_tun_server/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key:ro
       - ./ssh_tun_server/ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub:ro
-    init: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck"]
@@ -52,8 +49,6 @@ services:
       ssh_tun_server:
         condition: service_healthy
     network_mode: "service:ssh_tun_server"
-    security_opt:
-      - no-new-privileges:true
     volumes:
       - ./dns/unbound.conf:/etc/unbound/unbound.conf:ro
       - ./dns/unbound.conf.d:/etc/unbound/unbound.conf.d:ro
@@ -68,10 +63,6 @@ services:
     dns_search: []
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
-    pids_limit: 100
-    mem_limit: 256m
-    memswap_limit: 256m
-    cpus: 0.50
     logging:
       driver: none
 
