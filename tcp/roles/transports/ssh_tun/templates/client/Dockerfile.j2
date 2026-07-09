@@ -16,4 +16,16 @@ COPY entrypoint.sh /tmp/entrypoint.sh
 RUN install -D -m 0755 -o root -g root /tmp/entrypoint.sh /usr/local/bin/entrypoint.sh && \
     rm -f /tmp/entrypoint.sh
 
+RUN install -D -m 0755 -o root -g root /dev/stdin /usr/local/bin/healthcheck <<'EOS'
+#!/bin/sh
+set -eu
+: "${network_vpn_interface:?}"
+: "${network_vpn_gateway_ipv4:?}"
+
+comm="$(cat /proc/1/comm 2>/dev/null || true)"
+[ "$comm" = "ssh" ] || exit 1
+ip route show default | grep -q "^default via ${network_vpn_gateway_ipv4} dev ${network_vpn_interface}" || exit 1
+exit 0
+EOS
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
