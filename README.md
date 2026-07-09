@@ -7,29 +7,23 @@ connection and applies routing rules. `egress` is the remote exit node and DNS
 resolver. The current transport between nodes is `SSH TUN`.
 
 ```text
-Client
-  |
-  v
-+------------------------------+
-| VPS [ingress node]           |
-| local country                |
-| Xray + whitelist routing     |
-+---------------+--------------+
-                |
-                +-- DIRECT by default --> Internet [local exit]
-                |
-                `-- PROXY whitelist
-                    SSH TUN transport
+                  Client
                     |
                     v
-              +------------------------------+
-              | VPS [egress node]            |
-              | remote country               |
-              | SSH TUN server + Unbound DNS |
-              +---------------+--------------+
-                              |
-                              v
-                    Internet [remote exit]
+    +--------------------------------+
+    | VPS [ingress node]             |   DIRECT by default
+    | local country                  |--------------------> Internet [local exit]
+    | Xray + whitelist routing       |
+    +----------------+---------------+
+                     |
+                     | PROXY whitelist
+                     | SSH TUN transport
+                     v
+    +--------------------------------+
+    | VPS [egress node]              |
+    | remote country                 |--------------------> Internet [remote exit]
+    | SSH TUN server + Unbound DNS   |
+    +----------------+---------------+
 ```
 
 The scheme is designed to avoid a full-tunnel VPN mode on the client. Traffic is
