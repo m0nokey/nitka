@@ -1,7 +1,7 @@
 ---
 egress_remote_dir: /opt/nitka-egress
 ssh_tun_ssh_key_dir: "{{ playbook_dir }}/.generated/egress/ssh"
-ssh_tun_ssh_username: vpnuser
+ssh_tun_ssh_username: root
 ssh_tun_ssh_port: 22
 ssh_tun_public_host: 198.51.100.20
 ssh_tun_network_container_subnet_cidr_ipv4: 172.29.113.0/24

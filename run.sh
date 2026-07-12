@@ -380,9 +380,8 @@ github_latest_release_tag() {
     curl -fsSL \
         --connect-timeout 10 \
         --max-time 30 \
-        "https://api.github.com/repos/${repo}/releases?per_page=20" \
-    | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' \
-    | head -n1
+        "https://api.github.com/repos/${repo}/releases/latest" \
+    | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)".*/\1/p'
 }
 
 configured_updater_image() {
@@ -1531,7 +1530,7 @@ EOF
 ---
 egress_remote_dir: /opt/nitka-egress
 ssh_tun_ssh_key_dir: "{{ playbook_dir }}/.generated/egress/ssh"
-ssh_tun_ssh_username: vpnuser
+ssh_tun_ssh_username: root
 ssh_tun_ssh_port: ${ssh_tun_port}
 ssh_tun_public_host: ${egress_ip}
 ssh_tun_network_container_subnet_cidr_ipv4: 172.29.113.0/24
@@ -2360,7 +2359,7 @@ scan_egress_host_key() {
         -o KbdInteractiveAuthentication=no \
         -o ConnectTimeout=8 \
         -o LogLevel=ERROR \
-        "${ssh_tun_username:-vpnuser}@${host}" true >/dev/null 2>&1 || true
+        "${ssh_tun_username:-root}@${host}" true >/dev/null 2>&1 || true
 
     scanned_key="$(
         ssh-keygen -F "[${host}]:${port}" -f "$tmp_known_hosts" 2>/dev/null \

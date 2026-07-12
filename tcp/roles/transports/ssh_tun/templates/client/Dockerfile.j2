@@ -25,6 +25,7 @@ set -eu
 comm="$(cat /proc/1/comm 2>/dev/null || true)"
 [ "$comm" = "ssh" ] || exit 1
 ip route show default | grep -q "^default via ${network_vpn_gateway_ipv4} dev ${network_vpn_interface}" || exit 1
+ping -c 1 -W 2 "${network_vpn_gateway_ipv4}" >/dev/null 2>&1 || exit 1
 exit 0
 EOS
 

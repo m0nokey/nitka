@@ -17,13 +17,8 @@ RUN apk add --no-cache \
 RUN install -D -m 0755 -o root -g root /dev/stdin /usr/local/bin/healthcheck <<'EOS'
 #!/bin/sh
 set -eu
-: "${network_vpn_interface:?}"
-: "${network_vpn_gateway_cidr_ipv4:?}"
-: "${network_vpn_subnet_cidr_ipv4:?}"
 ss -ltn "( sport = :22 )" >/dev/null 2>&1 || exit 1
-ip addr show "${network_vpn_interface}" >/dev/null 2>&1 || exit 1
-ip addr show "${network_vpn_interface}" | grep -q "${network_vpn_gateway_cidr_ipv4}" || exit 1
-ip route show | grep -q "${network_vpn_subnet_cidr_ipv4}" || exit 1
+cat /proc/sys/net/ipv4/ip_forward | grep -qx 1 || exit 1
 exit 0
 EOS
 
@@ -63,7 +58,7 @@ cat > /etc/ssh/sshd_config <<CONF
 Protocol 2
 MaxSessions 2
 ListenAddress ${network_container_vpn_ipv4}:22
-PermitRootLogin no
+PermitRootLogin forced-commands-only
 PermitTunnel yes
 Compression no
 UseDNS no
@@ -89,7 +84,7 @@ PermitUserEnvironment no
 PermitUserRC no
 RekeyLimit 512M 1h
 AcceptEnv LANG LC_*
-AllowTcpForwarding yes
+AllowTcpForwarding no
 AllowAgentForwarding no
 AuthenticationMethods publickey
 PubkeyAuthentication yes
@@ -104,17 +99,47 @@ SyslogFacility AUTHPRIV
 Subsystem sftp /bin/false
 CONF
 
-ip link show "${network_vpn_interface}" >/dev/null 2>&1 || ip tuntap add dev "${network_vpn_interface}" mode tun user "${vpn_username}"
-ip addr flush dev "${network_vpn_interface}" >/dev/null 2>&1 || true
-ip addr add "${network_vpn_gateway_cidr_ipv4}" dev "${network_vpn_interface}"
-ip link set dev "${network_vpn_interface}" up mtu "${vpn_tun_mtu}"
+ip link del "${network_vpn_interface}" >/dev/null 2>&1 || true
 iptables -t nat -C POSTROUTING -s "${network_vpn_subnet_cidr_ipv4}" ! -o "${network_vpn_interface}" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s "${network_vpn_subnet_cidr_ipv4}" ! -o "${network_vpn_interface}" -j MASQUERADE
 iptables -C FORWARD -i "${network_vpn_interface}" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "${network_vpn_interface}" -j ACCEPT
 iptables -C FORWARD -o "${network_vpn_interface}" -j ACCEPT 2>/dev/null || iptables -A FORWARD -o "${network_vpn_interface}" -j ACCEPT
 iptables -t mangle -C FORWARD -o "${network_vpn_interface}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -o "${network_vpn_interface}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 iptables -t mangle -C FORWARD -i "${network_vpn_interface}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -i "${network_vpn_interface}" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
-exec /usr/sbin/sshd -D
+configure_tun() {
+    ip link show "${network_vpn_interface}" >/dev/null 2>&1 || return 0
+    if ! ip addr show "${network_vpn_interface}" | grep -q "${network_vpn_gateway_cidr_ipv4}"; then
+        ip addr flush dev "${network_vpn_interface}" >/dev/null 2>&1 || true
+        ip addr add "${network_vpn_gateway_cidr_ipv4}" dev "${network_vpn_interface}"
+    fi
+    ip link set dev "${network_vpn_interface}" up mtu "${vpn_tun_mtu}"
+}
+
+watch_tun() {
+    while kill -0 "${sshd_pid}" 2>/dev/null; do
+        configure_tun
+        sleep 1
+    done
+}
+
+stop_sshd() {
+    kill "${sshd_pid}" 2>/dev/null || true
+    kill "${watch_pid}" 2>/dev/null || true
+}
+
+/usr/sbin/sshd -D &
+sshd_pid=$!
+watch_tun &
+watch_pid=$!
+trap stop_sshd INT TERM
+
+if wait "${sshd_pid}"; then
+    rc=0
+else
+    rc=$?
+fi
+kill "${watch_pid}" 2>/dev/null || true
+exit "${rc}"
 EOS
 
 EXPOSE 22
