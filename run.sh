@@ -380,9 +380,8 @@ github_latest_release_tag() {
     curl -fsSL \
         --connect-timeout 10 \
         --max-time 30 \
-        "https://api.github.com/repos/${repo}/releases?per_page=20" \
-    | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' \
-    | head -n1
+        "https://api.github.com/repos/${repo}/releases/latest" \
+    | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)".*/\1/p'
 }
 
 configured_updater_image() {
