@@ -900,6 +900,9 @@ persist_vault() {
 save_state() {
     local group_vars_file="${tcp_dir}/group_vars/ingress.yml"
     local saved_obfs_host saved_obfs_path
+    local routing_file="${tcp_dir}/routing/rules.yml"
+    local shadowrocket_file="${tcp_dir}/shadowrocket.conf"
+    local policy_backup_dir=""
     local host_private_key_file="${generated_dir}/egress/ssh/ssh_host_ed25519_key"
     local host_public_key_file="${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
     local saved_host_private_key="" saved_host_public_key=""
@@ -913,7 +916,40 @@ save_state() {
     [[ -f "$host_public_key_file" ]] && saved_host_public_key="$(cat "$host_public_key_file")"
 
     if [[ ! -f "${project_state}" ]]; then
-        materialize_from_vault
+        policy_backup_dir="$(mktemp -d "${TMPDIR:-/tmp}/nitka-save-state.XXXXXX")" || return 1
+        if [[ -f "$routing_file" ]]; then
+            cp "$routing_file" "$policy_backup_dir/rules.yml" || {
+                rm -rf "$policy_backup_dir"
+                return 1
+            }
+        fi
+        if [[ -f "$shadowrocket_file" ]]; then
+            cp "$shadowrocket_file" "$policy_backup_dir/shadowrocket.conf" || {
+                rm -rf "$policy_backup_dir"
+                return 1
+            }
+        fi
+
+        if ! materialize_from_vault; then
+            [[ -f "$policy_backup_dir/rules.yml" ]] && cp "$policy_backup_dir/rules.yml" "$routing_file"
+            [[ -f "$policy_backup_dir/shadowrocket.conf" ]] && cp "$policy_backup_dir/shadowrocket.conf" "$shadowrocket_file"
+            rm -rf "$policy_backup_dir"
+            return 1
+        fi
+
+        if [[ -f "$policy_backup_dir/rules.yml" ]]; then
+            cp "$policy_backup_dir/rules.yml" "$routing_file" || {
+                rm -rf "$policy_backup_dir"
+                return 1
+            }
+        fi
+        if [[ -f "$policy_backup_dir/shadowrocket.conf" ]]; then
+            cp "$policy_backup_dir/shadowrocket.conf" "$shadowrocket_file" || {
+                rm -rf "$policy_backup_dir"
+                return 1
+            }
+        fi
+        rm -rf "$policy_backup_dir"
     fi
 
     if [[ -n "$saved_obfs_host" ]]; then
