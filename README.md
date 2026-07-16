@@ -37,6 +37,35 @@ that is not listed in the routing policy exits normally through the local
 country. Only whitelist traffic is carried from ingress to egress over the
 transport layer and exits from the remote country.
 
+## Reverse VPN
+
+Nitka can also deploy an independent reverse VPN on the same two VPS nodes.
+It has separate Docker projects, containers, networks, SSH-TUN keys, TUN
+interface, ports, Xray credentials, routing policy, and updater/watchdog units.
+Deploying it does not recreate or replace the primary stack.
+
+```text
+    Client in a third country
+              |
+              v
+    +--------------------------------+
+    | Primary egress node            |  reverse entry
+    | reverse Xray + Clash + TUN     |
+    +----------------+---------------+
+                     |
+                     | reverse SSH TUN
+                     v
+    +--------------------------------+
+    | Primary ingress node           |  reverse exit
+    | reverse SSH TUN server + NAT  |---------------> Internet
+    +--------------------------------+
+```
+
+In the reverse topology, traffic enters on the primary egress node and exits
+through the primary ingress node. The reverse deployment uses `tun20`, a
+separate VPN subnet, independently generated SSH-TUN/XHTTP/Reality ports, and
+separate persisted keys and state.
+
 ## Egress DNS
 
 The egress node also runs Unbound. It is used by the SSH TUN path as the remote
@@ -150,10 +179,10 @@ needed to reproduce and manage the deployment:
 
 - ingress and egress connection details
 - generated management SSH keys
-- SSH TUN transport keypair
-- generated Xray UUIDs, ports, and Reality keys
-- routing policy and Shadowrocket profile
-- generated client links
+- primary and reverse SSH TUN transport keypairs
+- primary and reverse Xray UUIDs, ports, and Reality keys
+- primary and reverse routing policies and Shadowrocket profiles
+- primary and reverse generated client links
 
 Public examples:
 
@@ -197,6 +226,7 @@ Restore it after cloning the repository:
     ├── group_vars/*.example.yml   # public node variable examples
     ├── ingress.yml                # deploy ingress node
     ├── egress.yml                 # deploy egress node
+    ├── reverse.yml                # deploy reverse VPN stack
     ├── bootstrap.yml              # create management users and keys
     ├── harden_ssh.yml             # harden SSH with rollback protection
     ├── debug_ssh.yml              # manual SSH diagnostics
@@ -227,6 +257,10 @@ Routing is whitelist-based:
 - changing `routing/primary_vpn_conf/rules.yml` and redeploying
   ingress updates the rendered Xray config
 
+The reverse policy is kept separately in
+`routing/reverse_vpn_conf/rules.yml` and is applied by the reverse deploy
+target. Changing one policy does not change the other.
+
 ## Shadowrocket
 
 The public primary profile is
@@ -251,6 +285,7 @@ Most common direct commands:
 ```bash
 ./run.sh --setup
 ./run.sh --deploy
+./run.sh --reverse
 ./run.sh --show-links
 ./run.sh --rotate xray
 ./run.sh --rotate ssh-tun
@@ -263,7 +298,20 @@ Manual deployment targets:
 ```bash
 ./run.sh --egress      # deploy only the egress node
 ./run.sh --ingress     # deploy only the ingress node
+./run.sh --reverse     # deploy only the reverse VPN stack
 ./run.sh --syntax      # run Ansible syntax checks
+```
+
+The interactive `Deploy` menu is split into `Primary VPN` and `Reverse VPN`.
+Each submenu supports full deployment, deployment of one side only, and a
+syntax check.
+
+Remove one stack without touching the other:
+
+```bash
+./run.sh --uninstall primary
+./run.sh --uninstall reverse
+./run.sh --uninstall all
 ```
 
 `./run.sh --sync-egress-host-key` is a recovery operation for SSH TUN host-key
