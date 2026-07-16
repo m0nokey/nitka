@@ -1,5 +1,5 @@
 ---
-# Example routing policy. The full policy stays in the encrypted vault.
+# Example primary VPN routing policy. The full policy stays in the encrypted vault.
 
 ingress_clash_tcp_concurrent: true
 

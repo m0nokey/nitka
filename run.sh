@@ -3,6 +3,12 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 tcp_dir="${script_dir}/tcp"
+shadowrocket_dir="${script_dir}/shadowrocket"
+server_routing_dir="${script_dir}/routing"
+primary_vpn_conf_dir="${shadowrocket_dir}/primary_vpn_conf"
+reverse_vpn_conf_dir="${shadowrocket_dir}/reverse_vpn_conf"
+primary_routing_dir="${server_routing_dir}/primary_vpn_conf"
+reverse_routing_dir="${server_routing_dir}/reverse_vpn_conf"
 compose_file="${script_dir}/compose.yml"
 state_root="${NITKA_STATE_ROOT:-${XDG_STATE_HOME:-${HOME}/.local/state}/nitka}"
 vault_dir="${state_root}/vault"
@@ -29,7 +35,7 @@ theme::init() {
         COLOR_DEBUG=$'\033[38;5;147m'
         COLOR_TRACE=$'\033[38;5;110m'
         COLOR_SUBTITLE=$'\033[38;5;189m'
-        COLOR_MUTED=$'\033[38;5;245m'
+        COLOR_MUTED=$'\033[38;5;250m'
     else
         COLOR_RESET=''
         COLOR_TEXT=''
@@ -134,19 +140,50 @@ prune_vault_backups() {
 }
 
 seed_policy_files_from_examples() {
-    local src dst
-    for src in \
-        "${tcp_dir}/routing/rules.example.yml" \
-        "${tcp_dir}/shadowrocket.example.conf"; do
-        case "$src" in
-            */routing/rules.example.yml) dst="${tcp_dir}/routing/rules.yml" ;;
-            */shadowrocket.example.conf) dst="${tcp_dir}/shadowrocket.conf" ;;
-            *) continue ;;
-        esac
-        if [[ ! -f "${dst}" && -f "${src}" ]]; then
-            mkdir -p "$(dirname -- "${dst}")"
-            cp "${src}" "${dst}"
-            chmod 0644 "${dst}"
+    local legacy_routing_file="${tcp_dir}/routing/rules.yml"
+    local legacy_shadowrocket_file="${tcp_dir}/shadowrocket.conf"
+    local profile src
+
+    # Migrate the pre-split primary files before seeding examples.
+    if [[ ! -f "${primary_routing_dir}/rules.yml" && -f "$legacy_routing_file" ]]; then
+        mkdir -p "${primary_routing_dir}"
+        cp "$legacy_routing_file" "${primary_routing_dir}/rules.yml"
+        chmod 0644 "${primary_routing_dir}/rules.yml"
+    fi
+    if [[ ! -f "${primary_vpn_conf_dir}/shadowrocket.conf" && -f "$legacy_shadowrocket_file" ]]; then
+        mkdir -p "${primary_vpn_conf_dir}"
+        cp "$legacy_shadowrocket_file" "${primary_vpn_conf_dir}/shadowrocket.conf"
+        chmod 0644 "${primary_vpn_conf_dir}/shadowrocket.conf"
+    fi
+
+    for profile in primary reverse; do
+        if [[ "$profile" == primary ]]; then
+            src="${primary_vpn_conf_dir}"
+        else
+            src="${reverse_vpn_conf_dir}"
+        fi
+
+        for pair in \
+            "${src}/shadowrocket.example.conf:${src}/shadowrocket.conf"; do
+            local example_file="${pair%%:*}"
+            local runtime_file="${pair#*:}"
+            if [[ ! -f "${runtime_file}" && -f "${example_file}" ]]; then
+                mkdir -p "$(dirname -- "${runtime_file}")"
+                cp "${example_file}" "${runtime_file}"
+                chmod 0644 "${runtime_file}"
+            fi
+        done
+    done
+
+    for pair in \
+        "${primary_routing_dir}/rules.example.yml:${primary_routing_dir}/rules.yml" \
+        "${reverse_routing_dir}/rules.example.yml:${reverse_routing_dir}/rules.yml"; do
+        local example_file="${pair%%:*}"
+        local runtime_file="${pair#*:}"
+        if [[ ! -f "${runtime_file}" && -f "${example_file}" ]]; then
+            mkdir -p "$(dirname -- "${runtime_file}")"
+            cp "${example_file}" "${runtime_file}"
+            chmod 0644 "${runtime_file}"
         fi
     done
 }
@@ -285,6 +322,7 @@ usage() {
     printf '%sDeploy Targets%s\n' "$COLOR_HEADER" "$COLOR_RESET"
     usage_item "--egress" "Deploy only the egress node."
     usage_item "--ingress" "Deploy only the ingress node."
+    usage_item "--reverse" "Deploy the reverse VPN stack without changing the primary stack."
     usage_item "--syntax" "Run Ansible syntax checks."
     printf '\n'
 
@@ -292,7 +330,9 @@ usage() {
     usage_item "--rotate xray" "Regenerate Xray credentials, deploy ingress, and print new links."
     usage_item "--rotate ssh-tun" "Regenerate internal SSH TUN keypair and deploy both nodes."
     usage_item "--rekey" "Change the password for the encrypted Vault state."
-    usage_item "--uninstall" "Remove only this project from both nodes."
+    usage_item "--uninstall primary" "Remove the primary VPN stack only."
+    usage_item "--uninstall reverse" "Remove the reverse VPN stack only."
+    usage_item "--uninstall all" "Full removal of both VPN stacks."
     usage_item "--lock" "Remove local decrypted/materialized cache."
     usage_item "--save-state" "Encrypt current local materialized config into the Vault."
     usage_item "--sync-egress-host-key" "Review and update the pinned SSH TUN egress host key, then deploy ingress."
@@ -791,6 +831,9 @@ write_project_state() {
         printf 'ssh_tun_port=%s\n' "${ssh_tun_port}"
         printf 'xhttp_port=%s\n' "${xhttp_port}"
         printf 'reality_port=%s\n' "${reality_port}"
+        printf 'reverse_ssh_tun_port=%s\n' "${reverse_ssh_tun_port:-}"
+        printf 'reverse_xhttp_port=%s\n' "${reverse_xhttp_port:-}"
+        printf 'reverse_reality_port=%s\n' "${reverse_reality_port:-}"
         printf 'ingress_xray_obfs_host=%s\n' "$(shell_quote "${current_obfs_host}")"
         printf 'ingress_xray_obfs_path=%s\n' "$(shell_quote "${current_obfs_path}")"
         printf 'ingress_management_user=%s\n' "${ingress_management_user:-ingress}"
@@ -822,6 +865,8 @@ sync_project_state_from_group_vars() {
 
     # shellcheck disable=SC1090
     source "${project_state}"
+    generate_runtime_ports
+    generate_reverse_runtime_ports
 
     if [[ -n "$group_obfs_host" ]]; then
         ingress_xray_obfs_host="$group_obfs_host"
@@ -857,6 +902,10 @@ persist_vault() {
         "ssh_tun_public_key:${generated_dir}/egress/ssh/id_ed25519.pub" \
         "ssh_tun_host_private_key_b64:${generated_dir}/egress/ssh/ssh_host_ed25519_key" \
         "ssh_tun_host_public_key:${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub" \
+        "reverse_ssh_tun_private_key_b64:${generated_dir}/reverse/ssh/id_ed25519" \
+        "reverse_ssh_tun_public_key:${generated_dir}/reverse/ssh/id_ed25519.pub" \
+        "reverse_ssh_tun_host_private_key_b64:${generated_dir}/reverse/ssh/ssh_host_ed25519_key" \
+        "reverse_ssh_tun_host_public_key:${generated_dir}/reverse/ssh/ssh_host_ed25519_key.pub" \
         "xray_xhttp_uuid:${generated_dir}/ingress/state/xhttp_uuid" \
         "xray_reality_uuid:${generated_dir}/ingress/state/reality_uuid" \
         "xray_xhttp_port:${generated_dir}/ingress/state/xhttp_port" \
@@ -865,8 +914,18 @@ persist_vault() {
         "xray_reality_private_key:${generated_dir}/ingress/state/reality_private_key" \
         "xray_reality_public_key:${generated_dir}/ingress/state/reality_public_key" \
         "share_links_b64:${generated_dir}/ingress/share-links.txt" \
-        "routing_rules_b64:${tcp_dir}/routing/rules.yml" \
-        "shadowrocket_conf_b64:${tcp_dir}/shadowrocket.conf"; do
+        "reverse_xray_xhttp_uuid:${generated_dir}/reverse/ingress/state/xhttp_uuid" \
+        "reverse_xray_reality_uuid:${generated_dir}/reverse/ingress/state/reality_uuid" \
+        "reverse_xray_xhttp_port:${generated_dir}/reverse/ingress/state/xhttp_port" \
+        "reverse_xray_reality_port:${generated_dir}/reverse/ingress/state/reality_port" \
+        "reverse_xray_reality_short_id:${generated_dir}/reverse/ingress/state/reality_short_id" \
+        "reverse_xray_reality_private_key:${generated_dir}/reverse/ingress/state/reality_private_key" \
+        "reverse_xray_reality_public_key:${generated_dir}/reverse/ingress/state/reality_public_key" \
+        "reverse_share_links_b64:${generated_dir}/reverse/ingress/share-links.txt" \
+        "primary_routing_rules_b64:${primary_routing_dir}/rules.yml" \
+        "primary_shadowrocket_conf_b64:${primary_vpn_conf_dir}/shadowrocket.conf" \
+        "reverse_routing_rules_b64:${reverse_routing_dir}/rules.yml" \
+        "reverse_shadowrocket_conf_b64:${reverse_vpn_conf_dir}/shadowrocket.conf"; do
         name="${item%%:*}"
         path="${item#*:}"
         if [[ -f "$path" ]]; then
@@ -900,8 +959,6 @@ persist_vault() {
 save_state() {
     local group_vars_file="${tcp_dir}/group_vars/ingress.yml"
     local saved_obfs_host saved_obfs_path
-    local routing_file="${tcp_dir}/routing/rules.yml"
-    local shadowrocket_file="${tcp_dir}/shadowrocket.conf"
     local policy_backup_dir=""
     local host_private_key_file="${generated_dir}/egress/ssh/ssh_host_ed25519_key"
     local host_public_key_file="${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
@@ -917,38 +974,48 @@ save_state() {
 
     if [[ ! -f "${project_state}" ]]; then
         policy_backup_dir="$(mktemp -d "${TMPDIR:-/tmp}/nitka-save-state.XXXXXX")" || return 1
-        if [[ -f "$routing_file" ]]; then
-            cp "$routing_file" "$policy_backup_dir/rules.yml" || {
-                rm -rf "$policy_backup_dir"
-                return 1
-            }
-        fi
-        if [[ -f "$shadowrocket_file" ]]; then
-            cp "$shadowrocket_file" "$policy_backup_dir/shadowrocket.conf" || {
-                rm -rf "$policy_backup_dir"
-                return 1
-            }
-        fi
+        for policy_file in \
+            "${primary_routing_dir}/rules.yml" \
+            "${primary_vpn_conf_dir}/shadowrocket.conf" \
+            "${reverse_routing_dir}/rules.yml" \
+            "${reverse_vpn_conf_dir}/shadowrocket.conf"; do
+            if [[ -f "$policy_file" ]]; then
+                relative_file="${policy_file#"${shadowrocket_dir}/"}"
+                mkdir -p "${policy_backup_dir}/$(dirname -- "$relative_file")"
+                cp "$policy_file" "${policy_backup_dir}/${relative_file}" || {
+                    rm -rf "$policy_backup_dir"
+                    return 1
+                }
+            fi
+        done
 
         if ! materialize_from_vault; then
-            [[ -f "$policy_backup_dir/rules.yml" ]] && cp "$policy_backup_dir/rules.yml" "$routing_file"
-            [[ -f "$policy_backup_dir/shadowrocket.conf" ]] && cp "$policy_backup_dir/shadowrocket.conf" "$shadowrocket_file"
+            for policy_file in \
+                "${primary_routing_dir}/rules.yml" \
+                "${primary_vpn_conf_dir}/shadowrocket.conf" \
+                "${reverse_routing_dir}/rules.yml" \
+                "${reverse_vpn_conf_dir}/shadowrocket.conf"; do
+                relative_file="${policy_file#"${shadowrocket_dir}/"}"
+                [[ -f "${policy_backup_dir}/${relative_file}" ]] && cp "${policy_backup_dir}/${relative_file}" "$policy_file"
+            done
             rm -rf "$policy_backup_dir"
             return 1
         fi
 
-        if [[ -f "$policy_backup_dir/rules.yml" ]]; then
-            cp "$policy_backup_dir/rules.yml" "$routing_file" || {
-                rm -rf "$policy_backup_dir"
-                return 1
-            }
-        fi
-        if [[ -f "$policy_backup_dir/shadowrocket.conf" ]]; then
-            cp "$policy_backup_dir/shadowrocket.conf" "$shadowrocket_file" || {
-                rm -rf "$policy_backup_dir"
-                return 1
-            }
-        fi
+        for policy_file in \
+            "${primary_routing_dir}/rules.yml" \
+            "${primary_vpn_conf_dir}/shadowrocket.conf" \
+            "${reverse_routing_dir}/rules.yml" \
+            "${reverse_vpn_conf_dir}/shadowrocket.conf"; do
+            relative_file="${policy_file#"${shadowrocket_dir}/"}"
+            if [[ -f "${policy_backup_dir}/${relative_file}" ]]; then
+                mkdir -p "$(dirname -- "$policy_file")"
+                cp "${policy_backup_dir}/${relative_file}" "$policy_file" || {
+                    rm -rf "$policy_backup_dir"
+                    return 1
+                }
+            fi
+        done
         rm -rf "$policy_backup_dir"
     fi
 
@@ -1022,6 +1089,18 @@ materialize_from_vault() {
         printf '%s\n' "$ssh_tun_host_public_key" > "${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
         chmod 0644 "${generated_dir}/egress/ssh/ssh_host_ed25519_key.pub"
     fi
+    [[ -n "${reverse_ssh_tun_private_key_b64:-}" ]] && write_b64_file "$reverse_ssh_tun_private_key_b64" "${generated_dir}/reverse/ssh/id_ed25519" 0600
+    if [[ -n "${reverse_ssh_tun_public_key:-}" ]]; then
+        mkdir -p "${generated_dir}/reverse/ssh"
+        printf '%s\n' "$reverse_ssh_tun_public_key" > "${generated_dir}/reverse/ssh/id_ed25519.pub"
+        chmod 0644 "${generated_dir}/reverse/ssh/id_ed25519.pub"
+    fi
+    [[ -n "${reverse_ssh_tun_host_private_key_b64:-}" ]] && write_b64_file "$reverse_ssh_tun_host_private_key_b64" "${generated_dir}/reverse/ssh/ssh_host_ed25519_key" 0600
+    if [[ -n "${reverse_ssh_tun_host_public_key:-}" ]]; then
+        mkdir -p "${generated_dir}/reverse/ssh"
+        printf '%s\n' "$reverse_ssh_tun_host_public_key" > "${generated_dir}/reverse/ssh/ssh_host_ed25519_key.pub"
+        chmod 0644 "${generated_dir}/reverse/ssh/ssh_host_ed25519_key.pub"
+    fi
     mkdir -p "${generated_dir}/ingress/state"
     for pair in \
         "xray_xhttp_uuid:xhttp_uuid" \
@@ -1041,14 +1120,47 @@ materialize_from_vault() {
     done
     [[ -f "${generated_dir}/ingress/state/reality_public_key" ]] && chmod 0644 "${generated_dir}/ingress/state/reality_public_key"
     [[ -n "${share_links_b64:-}" ]] && write_b64_file "$share_links_b64" "${generated_dir}/ingress/share-links.txt" 0600
-    [[ -n "${routing_rules_b64:-}" ]] && write_b64_file "$routing_rules_b64" "${tcp_dir}/routing/rules.yml" 0644
-    [[ -n "${shadowrocket_conf_b64:-}" ]] && write_b64_file "$shadowrocket_conf_b64" "${tcp_dir}/shadowrocket.conf" 0644
+    mkdir -p "${generated_dir}/reverse/ingress/state"
+    for pair in \
+        "reverse_xray_xhttp_uuid:xhttp_uuid" \
+        "reverse_xray_reality_uuid:reality_uuid" \
+        "reverse_xray_xhttp_port:xhttp_port" \
+        "reverse_xray_reality_port:reality_port" \
+        "reverse_xray_reality_short_id:reality_short_id" \
+        "reverse_xray_reality_private_key:reality_private_key" \
+        "reverse_xray_reality_public_key:reality_public_key"; do
+        var="${pair%%:*}"
+        file="${pair#*:}"
+        value="${!var:-}"
+        if [[ -n "$value" ]]; then
+            printf '%s\n' "$value" > "${generated_dir}/reverse/ingress/state/${file}"
+            chmod 0600 "${generated_dir}/reverse/ingress/state/${file}"
+        fi
+    done
+    [[ -f "${generated_dir}/reverse/ingress/state/reality_public_key" ]] && chmod 0644 "${generated_dir}/reverse/ingress/state/reality_public_key"
+    [[ -n "${reverse_share_links_b64:-}" ]] && write_b64_file "$reverse_share_links_b64" "${generated_dir}/reverse/ingress/share-links.txt" 0600
+    if [[ -n "${primary_routing_rules_b64:-}" ]]; then
+        write_b64_file "$primary_routing_rules_b64" "${primary_routing_dir}/rules.yml" 0644
+    elif [[ -n "${routing_rules_b64:-}" ]]; then
+        # Backward compatibility with Vaults created before profile splitting.
+        write_b64_file "$routing_rules_b64" "${primary_routing_dir}/rules.yml" 0644
+    fi
+    if [[ -n "${primary_shadowrocket_conf_b64:-}" ]]; then
+        write_b64_file "$primary_shadowrocket_conf_b64" "${primary_vpn_conf_dir}/shadowrocket.conf" 0644
+    elif [[ -n "${shadowrocket_conf_b64:-}" ]]; then
+        # Backward compatibility with Vaults created before profile splitting.
+        write_b64_file "$shadowrocket_conf_b64" "${primary_vpn_conf_dir}/shadowrocket.conf" 0644
+    fi
+    [[ -n "${reverse_routing_rules_b64:-}" ]] && write_b64_file "$reverse_routing_rules_b64" "${reverse_routing_dir}/rules.yml" 0644
+    [[ -n "${reverse_shadowrocket_conf_b64:-}" ]] && write_b64_file "$reverse_shadowrocket_conf_b64" "${reverse_vpn_conf_dir}/shadowrocket.conf" 0644
 
     if [[ -f "${project_state}" ]]; then
         # shellcheck disable=SC1090
         source "${project_state}"
         generate_runtime_ports
+        generate_reverse_runtime_ports
         write_group_vars "${ingress_ip}" "${egress_ip}" "${runtime_ssh_tun_port}" "${runtime_xhttp_port}" "${runtime_reality_port}"
+        write_reverse_group_vars "${ingress_ip}" "${egress_ip}" "${runtime_reverse_ssh_tun_port}" "${runtime_reverse_xhttp_port}" "${runtime_reverse_reality_port}"
         if [[ -n "${harden_ssh_completed_at:-}" ]]; then
             append_harden_group_vars "${ingress_initial_user}" "${ingress_sshd_port:-${ingress_management_port:-$ingress_initial_port}}" "${egress_initial_user}" "${egress_sshd_port:-${egress_management_port:-$egress_initial_port}}"
         fi
@@ -1407,6 +1519,103 @@ generate_runtime_ports() {
     runtime_reality_port="${reality_port}"
 }
 
+generate_reverse_runtime_ports() {
+    local state_dir="${generated_dir}/reverse/ports"
+    local current_reverse_ssh_tun_port="${reverse_ssh_tun_port:-}"
+    local current_reverse_xhttp_port="${reverse_xhttp_port:-}"
+    local current_reverse_reality_port="${reverse_reality_port:-}"
+    local primary_ports="${runtime_ssh_tun_port:-} ${runtime_xhttp_port:-} ${runtime_reality_port:-}"
+    local item value file
+
+    mkdir -p "${state_dir}" "${generated_dir}/reverse/ingress/state"
+    for item in ssh_tun_port xhttp_port reality_port; do
+        case "$item" in
+            ssh_tun_port) value="$current_reverse_ssh_tun_port" ;;
+            xhttp_port) value="$current_reverse_xhttp_port" ;;
+            reality_port) value="$current_reverse_reality_port" ;;
+        esac
+        file="${state_dir}/${item}"
+        if [[ -f "$file" ]]; then
+            value="$(<"$file")"
+        elif [[ -z "$value" ]]; then
+            while :; do
+                value="$(generate_port 20000 60000)"
+                [[ " ${primary_ports} " != *" ${value} "* ]] || continue
+                [[ "$item" == ssh_tun_port || "$value" != "$current_reverse_ssh_tun_port" ]] || continue
+                [[ "$item" != reality_port || "$value" != "$current_reverse_xhttp_port" ]] || continue
+                break
+            done
+        fi
+        printf '%s\n' "$value" > "$file"
+        case "$item" in
+            ssh_tun_port) current_reverse_ssh_tun_port="$value" ;;
+            xhttp_port) current_reverse_xhttp_port="$value" ;;
+            reality_port) current_reverse_reality_port="$value" ;;
+        esac
+    done
+    chmod 0600 "${state_dir}"/*
+    reverse_ssh_tun_port="$current_reverse_ssh_tun_port"
+    reverse_xhttp_port="$current_reverse_xhttp_port"
+    reverse_reality_port="$current_reverse_reality_port"
+    runtime_reverse_ssh_tun_port="$current_reverse_ssh_tun_port"
+    runtime_reverse_xhttp_port="$current_reverse_xhttp_port"
+    runtime_reverse_reality_port="$current_reverse_reality_port"
+}
+
+write_reverse_group_vars() {
+    local ingress_ip="$1" egress_ip="$2"
+    local ssh_tun_port="$3" xhttp_port="$4" reality_port="$5"
+    mkdir -p "${tcp_dir}/group_vars"
+    cat > "${tcp_dir}/group_vars/reverse.yml" <<EOF
+---
+ingress_remote_dir: /opt/nitka-reverse-ingress
+ingress_local_dir: "{{ playbook_dir }}/.generated/reverse/ingress"
+ingress_state_dir: "{{ ingress_local_dir }}/state"
+ingress_xray_share_link_path: "{{ ingress_local_dir }}/share-links.txt"
+ingress_xray_public_host: ${egress_ip}
+ingress_clash_port: 1081
+ingress_xray_xhttp_port: ${xhttp_port}
+ingress_xray_reality_port: ${reality_port}
+ingress_xray_xhttp_port_min: 20000
+ingress_xray_xhttp_port_max: 60000
+ingress_xray_reality_port_min: 20000
+ingress_xray_reality_port_max: 60000
+ingress_xray_obfs_host: example.com
+ingress_xray_obfs_path: /
+ingress_xray_xhttp_remarks: vless-reverse-xhttp-reality
+ingress_xray_reality_remarks: vless-reverse-reality-vision
+ingress_compose_project: nitka-reverse-ingress
+ingress_container_prefix: nitka-reverse
+ingress_network_name: nitka_reverse_ingress
+ingress_watchdog_name: nitka-reverse-ingress-watchdog
+ingress_watchdog_script_path: /usr/local/sbin/nitka-reverse-ingress-watchdog
+ingress_stack_ensure_path: /usr/local/sbin/nitka-reverse-ingress-ensure
+ssh_tun_ssh_key_dir: "{{ playbook_dir }}/.generated/reverse/ssh"
+ssh_tun_ssh_username: vpnuser
+ssh_tun_ssh_port: ${ssh_tun_port}
+ssh_tun_public_host: ${ingress_ip}
+ssh_tun_network_container_subnet_cidr_ipv4: 172.30.113.0/24
+ssh_tun_network_vpn_subnet_cidr_ipv4: 10.21.12.0/30
+ssh_tun_network_interface: tun20
+ssh_tun_device_number: 20
+ssh_tun_network_container_gateway_ipv4: 172.30.113.1
+ssh_tun_network_container_vpn_ipv4: 172.30.113.2
+ssh_tun_network_vpn_gateway_ipv4: 10.21.12.1
+ssh_tun_network_vpn_gateway_cidr_ipv4: 10.21.12.1/30
+ssh_tun_network_vpn_client_cidr_ipv4: 10.21.12.2/30
+ssh_tun_client_tun_mtu: 1200
+egress_remote_dir: /opt/nitka-reverse-egress
+egress_compose_project: nitka-reverse-egress
+egress_container_prefix: nitka-reverse
+egress_network_name: nitka_reverse_egress
+system_base_docker_updater_calendar: "*-*-* 03:00"
+egress_unbound_forward_servers:
+  - address: 1.1.1.1
+    tls_name: cloudflare-dns.com
+EOF
+    chmod 0644 "${tcp_dir}/group_vars/reverse.yml"
+}
+
 write_inventory_host() {
     local file="$1"
     local group="$2"
@@ -1665,6 +1874,12 @@ print_project_plan() {
     ui_kv "SSH TUN port" "${ssh_tun_port}"
     ui_kv "XHTTP port" "${xhttp_port}"
     ui_kv "Reality port" "${reality_port}"
+    if [[ -n "${reverse_ssh_tun_port:-}" ]]; then
+        printf '\nReverse VPN\n'
+        ui_kv "SSH TUN port" "${reverse_ssh_tun_port}"
+        ui_kv "XHTTP port" "${reverse_xhttp_port}"
+        ui_kv "Reality port" "${reverse_reality_port}"
+    fi
     ui_kv "Xray UUIDs" "yes"
     ui_kv "Reality keys" "yes"
     ui_kv "SSH keypairs" "yes"
@@ -1704,6 +1919,10 @@ print_client_links() {
     printf '%sClient Links%s\n' "$COLOR_HEADER" "$COLOR_RESET"
     printf '%s============%s\n\n\n' "$COLOR_LINE" "$COLOR_RESET"
     awk 'NF { if (seen++) printf "\n\n"; print }' "${generated_dir}/ingress/share-links.txt"
+    if [[ -f "${generated_dir}/reverse/ingress/share-links.txt" ]]; then
+        printf '\n\n%sReverse VPN%s\n%s============%s\n\n' "$COLOR_HEADER" "$COLOR_RESET" "$COLOR_LINE" "$COLOR_RESET"
+        awk 'NF { if (seen++) printf "\n\n"; print }' "${generated_dir}/reverse/ingress/share-links.txt"
+    fi
     printf '\n\n'
 }
 
@@ -1863,6 +2082,7 @@ init_project() {
     generate_management_key "${generated_dir}/management/ingress/id_ed25519" "nitka-ingress-management"
     generate_management_key "${generated_dir}/management/egress/id_ed25519" "nitka-egress-management"
     generate_runtime_ports
+    generate_reverse_runtime_ports
 
     if [[ "${ingress_auth_method}" == "key" ]]; then
         write_inventory_host "${tcp_dir}/inventory/ingress.yml" ingress ingress_node "${ingress_ip}" "${ingress_user}" "${ingress_port}" key "${ingress_bootstrap_key}" ""
@@ -1877,6 +2097,7 @@ init_project() {
     fi
 
     write_group_vars "${ingress_ip}" "${egress_ip}" "${runtime_ssh_tun_port}" "${runtime_xhttp_port}" "${runtime_reality_port}"
+    write_reverse_group_vars "${ingress_ip}" "${egress_ip}" "${runtime_reverse_ssh_tun_port}" "${runtime_reverse_xhttp_port}" "${runtime_reverse_reality_port}"
 
     initialized_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     ingress_initial_user="${ingress_user}"
@@ -1888,6 +2109,9 @@ init_project() {
     ssh_tun_port="${runtime_ssh_tun_port}"
     xhttp_port="${runtime_xhttp_port}"
     reality_port="${runtime_reality_port}"
+    reverse_ssh_tun_port="${runtime_reverse_ssh_tun_port}"
+    reverse_xhttp_port="${runtime_reverse_xhttp_port}"
+    reverse_reality_port="${runtime_reverse_reality_port}"
     ingress_management_user="ingress"
     ingress_management_port="${ingress_initial_port}"
     ingress_sshd_port="${ingress_initial_port}"
@@ -2460,6 +2684,18 @@ deploy_ingress_project() {
     ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml
 }
 
+deploy_reverse_project() {
+    ansible_run ansible-playbook -i inventory/ingress.yml -i inventory/egress.yml reverse.yml
+}
+
+deploy_reverse_egress_project() {
+    ansible_run ansible-playbook -i inventory/ingress.yml -i inventory/egress.yml reverse.yml --limit ingress
+}
+
+deploy_reverse_ingress_project() {
+    ansible_run ansible-playbook -i inventory/ingress.yml -i inventory/egress.yml reverse.yml --limit egress
+}
+
 deploy_project() {
     require_management_keys
     ansible_run ansible-playbook -i inventory/egress.yml egress.yml || {
@@ -2470,6 +2706,51 @@ deploy_project() {
         [[ "${nitka_debug}" == "1" ]] && debug_docker_project || true
         return 1
     }
+}
+
+uninstall_project() {
+    local target="${1:-all}"
+    local tag_args=()
+
+    case "$target" in
+        primary)
+            tag_args+=(--skip-tags reverse)
+            ;;
+        reverse)
+            tag_args+=(--tags reverse)
+            ;;
+        all)
+            ;;
+        *)
+            printf 'Usage: ./run.sh --uninstall primary|reverse|all\n' >&2
+            return 1
+            ;;
+    esac
+
+    ansible_run ansible-playbook \
+        -i inventory/egress.yml \
+        -i inventory/ingress.yml \
+        uninstall.yml \
+        "${tag_args[@]}"
+}
+
+show_uninstall_menu() {
+    local choice target
+    ui_clear
+    ui_title "Uninstall"
+    printf '1. Remove primary VPN\n'
+    printf '2. Remove reverse VPN\n'
+    printf '3. Full removal\n'
+    ui_controls "yes" "yes"
+    printf '%s?: %s' "$COLOR_LINE" "$COLOR_RESET"
+    read -r choice || true
+    case "$choice" in
+        1) target=primary ;;
+        2) target=reverse ;;
+        3) target=all ;;
+        *) return 0 ;;
+    esac
+    with_materialized_state uninstall_project "$target"
 }
 
 show_state_path_menu() {
@@ -2702,15 +2983,15 @@ show_setup_flow_menu() {
     done
 }
 
-show_deploy_menu() {
+show_primary_deploy_menu() {
     local choice
 
     while true; do
         ui_clear
-        ui_title "Deploy"
-        printf '%s1.%s %sDeploy all: egress then ingress%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
-        printf '%s2.%s %sDeploy egress only%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
-        printf '%s3.%s %sDeploy ingress only%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        ui_title "Deploy / Primary VPN"
+        printf '%s1.%s %sDeploy primary VPN full%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        printf '%s2.%s %sDeploy primary egress only%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        printf '%s3.%s %sDeploy primary ingress only%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
         printf '%s4.%s %sSyntax check%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
         ui_controls "yes" "yes"
         printf '%s?: %s' "$COLOR_LINE" "$COLOR_RESET"
@@ -2733,7 +3014,87 @@ show_deploy_menu() {
                 prepare_state_dirs
                 ansible_run ansible-playbook -i inventory/egress.yml egress.yml --syntax-check
                 ansible_run ansible-playbook -i inventory/ingress.yml ingress.yml --syntax-check
+                ansible_run ansible-playbook -i inventory/ingress.yml -i inventory/egress.yml reverse.yml --syntax-check
                 wait_action_return
+                ;;
+            b|B|m|M)
+                return 0
+                ;;
+            x|X)
+                exit_program
+                ;;
+            *)
+                log::warn "Invalid option."
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+show_reverse_deploy_menu() {
+    local choice
+
+    while true; do
+        ui_clear
+        ui_title "Deploy / Reverse VPN"
+        printf '%s1.%s %sDeploy reverse VPN full%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        printf '%s2.%s %sDeploy reverse egress only%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        printf '%s3.%s %sDeploy reverse ingress only%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        printf '%s4.%s %sSyntax check%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        ui_controls "yes" "yes"
+        printf '%s?: %s' "$COLOR_LINE" "$COLOR_RESET"
+        read -r choice || true
+
+        case "$choice" in
+            1|"")
+                with_materialized_state deploy_reverse_project
+                wait_action_return
+                ;;
+            2)
+                with_materialized_state deploy_reverse_egress_project
+                wait_action_return
+                ;;
+            3)
+                with_materialized_state deploy_reverse_ingress_project
+                wait_action_return
+                ;;
+            4)
+                prepare_state_dirs
+                ansible_run ansible-playbook -i inventory/ingress.yml -i inventory/egress.yml reverse.yml --syntax-check
+                wait_action_return
+                ;;
+            b|B|m|M)
+                return 0
+                ;;
+            x|X)
+                exit_program
+                ;;
+            *)
+                log::warn "Invalid option."
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+show_deploy_menu() {
+    local choice
+
+    while true; do
+        ui_clear
+        ui_title "Deploy"
+        printf '%s1.%s %sPrimary VPN%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        printf '%s2.%s %sReverse VPN%s\n' "$COLOR_LINE" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET"
+        ui_controls "yes" "yes"
+        printf '%s?: %s' "$COLOR_LINE" "$COLOR_RESET"
+        read -r choice || true
+
+        case "$choice" in
+            1|"")
+                show_primary_deploy_menu
+                ;;
+            2)
+                show_reverse_deploy_menu
                 ;;
             b|B|m|M)
                 return 0
@@ -2798,7 +3159,7 @@ show_operations_menu() {
                 wait_action_return
                 ;;
             5)
-                with_materialized_state ansible_run ansible-playbook -i inventory/egress.yml -i inventory/ingress.yml uninstall.yml
+                show_uninstall_menu
                 wait_action_return
                 ;;
             6)
@@ -3079,7 +3440,9 @@ refresh_group_vars_from_state() {
     # shellcheck disable=SC1090
     source "${project_state}"
     generate_runtime_ports
+    generate_reverse_runtime_ports
     write_group_vars "${ingress_ip}" "${egress_ip}" "${runtime_ssh_tun_port}" "${runtime_xhttp_port}" "${runtime_reality_port}"
+    write_reverse_group_vars "${ingress_ip}" "${egress_ip}" "${runtime_reverse_ssh_tun_port}" "${runtime_reverse_xhttp_port}" "${runtime_reverse_reality_port}"
 }
 
 args=()
@@ -3165,6 +3528,11 @@ case "${cmd}" in
         with_materialized_state deploy_ingress_project
         ;;
 
+    reverse)
+        theme::init
+        with_materialized_state deploy_reverse_project
+        ;;
+
     deploy)
         theme::init
         with_materialized_state deploy_project
@@ -3182,7 +3550,7 @@ case "${cmd}" in
 
     uninstall)
         theme::init
-        with_materialized_state ansible_run ansible-playbook -i inventory/egress.yml -i inventory/ingress.yml uninstall.yml
+        with_materialized_state uninstall_project "${2:-all}"
         ;;
 
     rotate)

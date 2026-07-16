@@ -280,7 +280,7 @@
   become: true
   ansible.builtin.template:
     src: nitka-ingress-watchdog.sh.j2
-    dest: /usr/local/sbin/nitka-ingress-watchdog
+    dest: "{{ ingress_watchdog_script_path }}"
     owner: root
     group: root
     mode: "0755"
@@ -289,7 +289,7 @@
   become: true
   ansible.builtin.template:
     src: nitka-ingress-watchdog.service.j2
-    dest: /etc/systemd/system/nitka-ingress-watchdog.service
+    dest: "/etc/systemd/system/{{ ingress_watchdog_name }}.service"
     owner: root
     group: root
     mode: "0644"
@@ -299,7 +299,7 @@
   become: true
   ansible.builtin.template:
     src: nitka-ingress-watchdog.timer.j2
-    dest: /etc/systemd/system/nitka-ingress-watchdog.timer
+    dest: "/etc/systemd/system/{{ ingress_watchdog_name }}.timer"
     owner: root
     group: root
     mode: "0644"
@@ -309,7 +309,7 @@
   become: true
   ansible.builtin.template:
     src: ingress_stack_ensure.sh.j2
-    dest: /usr/local/sbin/ingress_stack_ensure
+    dest: "{{ ingress_stack_ensure_path }}"
     owner: root
     group: root
     mode: "0755"
@@ -317,14 +317,14 @@
 - name: Stop and disable ingress watchdog timer before stack changes
   become: true
   ansible.builtin.command:
-    cmd: systemctl disable --now nitka-ingress-watchdog.timer
+    cmd: "systemctl disable --now {{ ingress_watchdog_name }}.timer"
   changed_when: false
   failed_when: false
 
 - name: Mask ingress watchdog timer before stack changes
   become: true
   ansible.builtin.command:
-    cmd: systemctl mask nitka-ingress-watchdog.timer
+    cmd: "systemctl mask {{ ingress_watchdog_name }}.timer"
   changed_when: false
   failed_when: false
 
@@ -336,7 +336,7 @@
 - name: Stop ingress watchdog service before stack changes
   become: true
   ansible.builtin.systemd_service:
-    name: nitka-ingress-watchdog.service
+    name: "{{ ingress_watchdog_name }}.service"
     state: stopped
   failed_when: false
 
@@ -345,7 +345,7 @@
     - name: Run ingress stack ensure script
       become: true
       ansible.builtin.command:
-        cmd: /usr/local/sbin/ingress_stack_ensure
+        cmd: "{{ ingress_stack_ensure_path }}"
         chdir: "{{ ingress_remote_dir }}"
       register: ingress_stack_run
       changed_when: false
@@ -370,7 +370,7 @@
     - name: Retry ingress stack ensure script after SSH interruption
       become: true
       ansible.builtin.command:
-        cmd: /usr/local/sbin/ingress_stack_ensure
+        cmd: "{{ ingress_stack_ensure_path }}"
         chdir: "{{ ingress_remote_dir }}"
       register: ingress_stack_retry
       changed_when: false
@@ -388,7 +388,7 @@
 - name: Keep ingress watchdog timer masked and stopped
   become: true
   ansible.builtin.command:
-    cmd: systemctl mask --now nitka-ingress-watchdog.timer
+    cmd: "systemctl mask --now {{ ingress_watchdog_name }}.timer"
   changed_when: false
   failed_when: false
 
@@ -400,7 +400,7 @@
 - name: Enable ingress watchdog service
   become: true
   ansible.builtin.systemd_service:
-    name: nitka-ingress-watchdog.service
+    name: "{{ ingress_watchdog_name }}.service"
     enabled: true
     state: "{{ 'restarted' if (ingress_watchdog_service.changed or ingress_watchdog_timer.changed) else 'started' }}"
 

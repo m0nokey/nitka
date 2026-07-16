@@ -1,0 +1,37 @@
+---
+# Example reverse VPN routing policy. The full policy stays in the encrypted vault.
+
+ingress_clash_tcp_concurrent: true
+
+ingress_xray_block_domains:
+  - geosite:category-ads-all
+  - domain:example-advertising.com
+
+ingress_xray_block_ips:
+  - 0.0.0.0/32
+
+ingress_xray_reality_direct_domains:
+  - domain:youtube.com
+  - domain:youtu.be
+
+ingress_xray_reality_direct_ips: []
+
+ingress_xray_xhttp_direct_domains:
+  - domain:youtube.com
+  - domain:youtu.be
+
+ingress_xray_xhttp_direct_ips: []
+
+ingress_xray_reality_proxy_domains:
+  - domain:telegram.org
+  - domain:telegram.me
+  - domain:example-proxy-service.com
+
+ingress_xray_reality_proxy_ips: []
+
+ingress_xray_dns_direct_domains:
+  - domain:example.local
+
+ingress_xray_dns_direct_servers:
+  - address: 1.1.1.1
+    port: 853

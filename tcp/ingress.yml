@@ -5,7 +5,7 @@
   vars_files:
     - group_vars/egress.yml
     - group_vars/ingress.yml
-    - routing/rules.yml
+    - ../routing/primary_vpn_conf/rules.yml
   roles:
     - role: system_base
       vars:

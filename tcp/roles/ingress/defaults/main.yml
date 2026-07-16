@@ -1,0 +1,7 @@
+---
+ingress_compose_project: nitka-ingress
+ingress_container_prefix: nitka
+ingress_network_name: nitka_ingress
+ingress_watchdog_name: nitka-ingress-watchdog
+ingress_watchdog_script_path: /usr/local/sbin/nitka-ingress-watchdog
+ingress_stack_ensure_path: /usr/local/sbin/ingress_stack_ensure

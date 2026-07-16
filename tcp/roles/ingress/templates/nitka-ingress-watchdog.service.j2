@@ -1,11 +1,11 @@
 [Unit]
-Description=Nitka ingress Docker namespace watchdog
+Description=Nitka {{ ingress_compose_project }} Docker namespace watchdog
 After=docker.service
 Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/sbin/nitka-ingress-watchdog --loop
+ExecStart={{ ingress_watchdog_script_path }} --loop
 Restart=always
 RestartSec=5
 TimeoutStartSec=30

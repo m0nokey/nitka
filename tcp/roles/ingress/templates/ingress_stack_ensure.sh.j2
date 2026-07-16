@@ -2,6 +2,9 @@
 set -uo pipefail
 
 nitka_debug="{{ nitka_debug | default(false) | bool | ternary('1', '0') }}"
+ssh_container="{{ ingress_container_prefix }}-ssh-tun-client"
+clash_container="{{ ingress_container_prefix }}-clashrs"
+xray_container="{{ ingress_container_prefix }}-xray"
 
 wait_healthy() {
     container="$1"
@@ -68,8 +71,8 @@ resolve_release_image() {
 
 remove_ingress_dependents() {
     docker compose rm -f -s clashrs xray >/dev/null 2>&1 || true
-    docker rm -f nitka-clashrs nitka-xray >/dev/null 2>&1 || true
-    for container in nitka-clashrs nitka-xray; do
+    docker rm -f "$clash_container" "$xray_container" >/dev/null 2>&1 || true
+    for container in "$clash_container" "$xray_container"; do
         end=$((SECONDS + 20))
         while docker inspect "$container" >/dev/null 2>&1 && [ "$SECONDS" -lt "$end" ]; do
             docker rm -f "$container" >/dev/null 2>&1 || true
@@ -83,9 +86,9 @@ remove_ingress_dependents() {
 }
 
 reset_ingress_stack_for_recovery() {
-    docker update --restart=no nitka-clashrs nitka-xray >/dev/null 2>&1 || true
-    docker rm -f nitka-xray nitka-clashrs >/dev/null 2>&1 || true
-    for container in nitka-xray nitka-clashrs; do
+    docker update --restart=no "$clash_container" "$xray_container" >/dev/null 2>&1 || true
+    docker rm -f "$xray_container" "$clash_container" >/dev/null 2>&1 || true
+    for container in "$xray_container" "$clash_container"; do
         end=$((SECONDS + 30))
         while docker inspect "$container" >/dev/null 2>&1 && [ "$SECONDS" -lt "$end" ]; do
             docker rm -f "$container" >/dev/null 2>&1 || true
@@ -112,10 +115,10 @@ resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:{tag_no_v}' lo
 # only services that depend on its network namespace, so deploys do not tear down
 # the whole ingress stack and do not wipe anonymous volumes.
 docker compose up -d --no-build --remove-orphans --no-deps ssh_tun_client || exit 1
-wait_healthy nitka-ssh-tun-client 90 || exit 1
+wait_healthy "$ssh_container" 90 || exit 1
 remove_ingress_dependents || exit 1
 docker compose up -d --force-recreate --no-deps clashrs || exit 1
-wait_healthy nitka-clashrs 60 || exit 1
+wait_healthy "$clash_container" 60 || exit 1
 docker compose up -d --force-recreate --no-deps xray || exit 1
 rc=0
 
@@ -125,13 +128,13 @@ if [ "$nitka_debug" = "1" ]; then
     echo "===== docker ps ====="
     docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' || true
     echo "===== container state ====="
-    for container in nitka-ssh-tun-client nitka-clashrs nitka-xray; do
+    for container in "$ssh_container" "$clash_container" "$xray_container"; do
         docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
     done
     echo "===== docker compose logs ====="
     docker compose logs --tail=200 || true
     echo "===== direct container logs ====="
-    for container in nitka-ssh-tun-client nitka-clashrs nitka-xray; do
+    for container in "$ssh_container" "$clash_container" "$xray_container"; do
         echo "----- $container -----"
         docker logs --tail=120 "$container" 2>&1 || true
     done

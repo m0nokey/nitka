@@ -43,13 +43,13 @@
       echo "===== docker ps ====="
       docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' || true
       echo "===== container state ====="
-      for container in nitka-ssh-tun-server nitka-unbound; do
+      for container in {{ egress_container_prefix }}-ssh-tun-server {{ egress_container_prefix }}-unbound; do
         docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
       done
       echo "===== docker compose logs ====="
       docker compose logs --tail=160 || true
       echo "===== direct container logs ====="
-      for container in nitka-ssh-tun-server nitka-unbound; do
+      for container in {{ egress_container_prefix }}-ssh-tun-server {{ egress_container_prefix }}-unbound; do
         echo "----- $container -----"
         docker logs --tail=120 "$container" 2>&1 || true
       done

@@ -12,6 +12,8 @@ secrets.env.plain.*
 .env
 .env.*
 !.env.example
+shadowrocket/*_vpn_conf/shadowrocket.conf
+routing/*_vpn_conf/rules.yml
 *.key
 *.pem
 *.crt

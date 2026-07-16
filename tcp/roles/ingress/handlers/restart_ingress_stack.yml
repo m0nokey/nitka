@@ -2,7 +2,7 @@
 - name: Run ingress stack ensure script from handler
   become: true
   ansible.builtin.command:
-    cmd: /usr/local/sbin/ingress_stack_ensure
+    cmd: "{{ ingress_stack_ensure_path }}"
     chdir: "{{ ingress_remote_dir }}"
   register: ingress_handler_run
   ignore_errors: true
@@ -26,7 +26,7 @@
 - name: Retry ingress stack ensure script from handler after SSH interruption
   become: true
   ansible.builtin.command:
-    cmd: /usr/local/sbin/ingress_stack_ensure
+    cmd: "{{ ingress_stack_ensure_path }}"
     chdir: "{{ ingress_remote_dir }}"
   when: ingress_handler_run.unreachable | default(false)
 

@@ -5,14 +5,14 @@ compose_dir="{{ ingress_remote_dir }}"
 ssh_service="ssh_tun_client"
 clash_service="clashrs"
 xray_service="xray"
-ssh_container="nitka-ssh-tun-client"
-clash_container="nitka-clashrs"
-xray_container="nitka-xray"
+ssh_container="{{ ingress_container_prefix }}-ssh-tun-client"
+clash_container="{{ ingress_container_prefix }}-clashrs"
+xray_container="{{ ingress_container_prefix }}-xray"
 clash_port="{{ ingress_clash_port }}"
 check_interval="{{ ingress_watchdog_interval_seconds | default(30) }}"
 
 log() {
-    logger -t nitka-ingress-watchdog "$*"
+    logger -t {{ ingress_watchdog_name }} "$*"
 }
 
 is_running() {

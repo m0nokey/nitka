@@ -60,6 +60,36 @@
         - /etc/systemd/system/nitka-os-updater.timer
         - /etc/logrotate.d/nitka-os-updater
 
+    - name: Stop reverse egress docker updater units
+      tags: [reverse]
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - nitka-reverse-egress-docker-updater.timer
+        - nitka-reverse-egress-docker-updater.service
+      failed_when: false
+
+    - name: Stop only this reverse egress compose project
+      tags: [reverse]
+      ansible.builtin.command:
+        cmd: docker compose down --remove-orphans
+        chdir: /opt/nitka-reverse-egress
+      failed_when: false
+      changed_when: false
+
+    - name: Remove reverse egress files
+      tags: [reverse]
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /opt/nitka-reverse-egress
+        - /usr/local/sbin/nitka-reverse-egress-docker-updater
+        - /etc/systemd/system/nitka-reverse-egress-docker-updater.service
+        - /etc/systemd/system/nitka-reverse-egress-docker-updater.timer
+
     - name: Reload systemd after ingress removal
       ansible.builtin.systemd_service:
         daemon_reload: true
@@ -114,6 +144,51 @@
         - /etc/systemd/system/nitka-os-updater.service
         - /etc/systemd/system/nitka-os-updater.timer
         - /etc/logrotate.d/nitka-os-updater
+
+    - name: Stop reverse ingress watchdog units
+      tags: [reverse]
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - nitka-reverse-ingress-watchdog.timer
+        - nitka-reverse-ingress-watchdog.service
+      failed_when: false
+
+    - name: Stop reverse ingress docker updater units
+      tags: [reverse]
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - nitka-reverse-ingress-docker-updater.timer
+        - nitka-reverse-ingress-docker-updater.service
+      failed_when: false
+
+    - name: Stop only this reverse ingress compose project
+      tags: [reverse]
+      ansible.builtin.command:
+        cmd: docker compose down --remove-orphans
+        chdir: /opt/nitka-reverse-ingress
+      failed_when: false
+      changed_when: false
+
+    - name: Remove reverse ingress files
+      tags: [reverse]
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /opt/nitka-reverse-ingress
+        - /usr/local/sbin/nitka-reverse-ingress-watchdog
+        - /usr/local/sbin/nitka-reverse-ingress-ensure
+        - /usr/local/sbin/nitka-reverse-ingress-docker-updater
+        - /etc/systemd/system/nitka-reverse-ingress-watchdog.service
+        - /etc/systemd/system/nitka-reverse-ingress-watchdog.timer
+        - /etc/systemd/system/nitka-reverse-ingress-docker-updater.service
+        - /etc/systemd/system/nitka-reverse-ingress-docker-updater.timer
 
     - name: Reload systemd after egress removal
       ansible.builtin.systemd_service:

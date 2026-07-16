@@ -161,8 +161,10 @@ Public examples:
 - `group_vars/egress.example.yml`
 - `inventory/ingress.example.yml`
 - `inventory/egress.example.yml`
-- `routing/rules.example.yml`
-- `shadowrocket.example.conf`
+- `routing/primary_vpn_conf/rules.example.yml`
+- `shadowrocket/primary_vpn_conf/shadowrocket.example.conf`
+- `routing/reverse_vpn_conf/rules.example.yml`
+- `shadowrocket/reverse_vpn_conf/shadowrocket.example.conf`
 
 During a run, the encrypted state is materialized into the local generated cache
 and mounted into the Ansible runner as:
@@ -190,11 +192,9 @@ Restore it after cloning the repository:
 ├── run.sh                         # menu, setup wizard, vault backup/restore
 ├── Dockerfile                     # portable Ansible runner image
 ├── compose.yml                    # local runner compose file
-└── tcp/                           # Ansible project
+├── tcp/                           # Ansible project
     ├── inventory/*.example.yml    # public node inventory examples
     ├── group_vars/*.example.yml   # public node variable examples
-    ├── routing/rules.example.yml  # public routing policy example
-    ├── shadowrocket.example.conf  # public client profile example
     ├── ingress.yml                # deploy ingress node
     ├── egress.yml                 # deploy egress node
     ├── bootstrap.yml              # create management users and keys
@@ -205,23 +205,36 @@ Restore it after cloning the repository:
         ├── egress/                # ssh_tun_server and Unbound DNS
         ├── system_base/           # Docker, timers, image updater, audit helper
         └── transports/ssh_tun/    # SSH TUN transport layer
+├── routing/                       # server-side Xray routing policies
+│   ├── primary_vpn_conf/rules.example.yml
+│   └── reverse_vpn_conf/rules.example.yml
+└── shadowrocket/                  # client profiles
+    ├── primary_vpn_conf/shadowrocket.example.conf
+    └── reverse_vpn_conf/shadowrocket.example.conf
 ```
 
 ## Routing Policy
 
-The public example policy lives in `routing/rules.example.yml`. The real policy
-is restored from Vault as `routing/rules.yml` and is not tracked by git.
+The public primary policy lives in
+`routing/primary_vpn_conf/rules.example.yml`. The real primary policy is
+restored from Vault as `routing/primary_vpn_conf/rules.yml` and is not tracked
+by git.
 
 Routing is whitelist-based:
 
 - `DIRECT` is the default path
 - `PROXY` is used only for explicitly listed domains
-- changing `routing/rules.yml` and redeploying ingress updates the rendered Xray config
+- changing `routing/primary_vpn_conf/rules.yml` and redeploying
+  ingress updates the rendered Xray config
 
 ## Shadowrocket
 
-The public example profile is `shadowrocket.example.conf`. The real
-`shadowrocket.conf` is restored from Vault and is not tracked by git.
+The public primary profile is
+`shadowrocket/primary_vpn_conf/shadowrocket.example.conf`. The real profile is
+restored from Vault as `shadowrocket/primary_vpn_conf/shadowrocket.conf` and is
+not tracked by git. Reverse VPN files use the matching `reverse_vpn_conf`
+directory. Shadowrocket profiles and server-side routing policies are stored
+separately because they are consumed by different components.
 
 ## Commands
 

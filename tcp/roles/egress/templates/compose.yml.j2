@@ -1,8 +1,8 @@
-name: nitka-egress
+name: {{ egress_compose_project }}
 
 services:
   ssh_tun_server:
-    container_name: nitka-ssh-tun-server
+    container_name: {{ egress_container_prefix }}-ssh-tun-server
     build:
       context: ./ssh_tun_server
     image: local/ssh-tun-server:latest
@@ -28,7 +28,7 @@ services:
     ports:
       - "{{ ssh_tun_ssh_port }}:22"
     networks:
-      nitka_egress:
+      {{ egress_network_name }}:
         ipv4_address: {{ ssh_tun_network_container_vpn_ipv4 }}
     dns_search: []
     tmpfs:
@@ -41,7 +41,7 @@ services:
       driver: none
 
   unbound:
-    container_name: nitka-unbound
+    container_name: {{ egress_container_prefix }}-unbound
     build:
       context: ./dns
     image: local/unbound:latest
@@ -67,8 +67,8 @@ services:
       driver: none
 
 networks:
-  nitka_egress:
-    name: nitka_egress
+  {{ egress_network_name }}:
+    name: {{ egress_network_name }}
     driver: bridge
     ipam:
       config:

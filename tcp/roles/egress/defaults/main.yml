@@ -1,0 +1,4 @@
+---
+egress_compose_project: nitka-egress
+egress_container_prefix: nitka
+egress_network_name: nitka_egress

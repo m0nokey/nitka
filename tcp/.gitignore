@@ -11,5 +11,3 @@ group_vars/*.yml
 !group_vars/*.example.yml
 inventory/*.yml
 !inventory/*.example.yml
-routing/rules.yml
-shadowrocket.conf
