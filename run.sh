@@ -1519,6 +1519,17 @@ ingress_remote_dir: /opt/nitka-ingress
 ingress_local_dir: "{{ playbook_dir }}/.generated/ingress"
 ingress_state_dir: "{{ ingress_local_dir }}/state"
 ingress_xray_share_link_path: "{{ ingress_local_dir }}/share-links.txt"
+ingress_watchdog_interval_seconds: 5
+ingress_ssh_healthcheck_interval: 5s
+ingress_ssh_healthcheck_timeout: 2s
+ingress_ssh_healthcheck_retries: 2
+ingress_ssh_healthcheck_start_period: 5s
+ingress_ssh_startup_timeout_seconds: 180
+ingress_clash_healthcheck_interval: 5s
+ingress_clash_healthcheck_timeout: 2s
+ingress_clash_healthcheck_retries: 2
+ingress_clash_healthcheck_start_period: 90s
+ingress_clash_startup_timeout_seconds: 180
 ssh_tun_ssh_key_dir: "{{ playbook_dir }}/.generated/egress/ssh"
 ssh_tun_ssh_private_key: "{{ ssh_tun_ssh_key_dir }}/id_ed25519"
 ssh_tun_ssh_public_key: "{{ ssh_tun_ssh_key_dir }}/id_ed25519.pub"

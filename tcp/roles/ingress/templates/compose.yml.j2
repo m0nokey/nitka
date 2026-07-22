@@ -21,10 +21,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+      interval: {{ ingress_ssh_healthcheck_interval | default('5s') }}
+      timeout: {{ ingress_ssh_healthcheck_timeout | default('2s') }}
+      retries: {{ ingress_ssh_healthcheck_retries | default(2) }}
+      start_period: {{ ingress_ssh_healthcheck_start_period | default('5s') }}
     volumes:
       - ./ssh_tun_client:/ssh:ro
     dns:
@@ -59,10 +59,10 @@ services:
     command: ["-d", "/etc/clash", "--compatibility"]
     healthcheck:
       test: ["CMD", "nc", "-z", "-w", "2", "127.0.0.1", "{{ ingress_clash_port }}"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      interval: {{ ingress_clash_healthcheck_interval | default('5s') }}
+      timeout: {{ ingress_clash_healthcheck_timeout | default('2s') }}
+      retries: {{ ingress_clash_healthcheck_retries | default(2) }}
+      start_period: {{ ingress_clash_healthcheck_start_period | default('5s') }}
     dns_search: []
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777

@@ -112,10 +112,10 @@ resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:{tag_no_v}' lo
 # only services that depend on its network namespace, so deploys do not tear down
 # the whole ingress stack and do not wipe anonymous volumes.
 docker compose up -d --no-build --remove-orphans --no-deps ssh_tun_client || exit 1
-wait_healthy nitka-ssh-tun-client 90 || exit 1
+wait_healthy nitka-ssh-tun-client {{ ingress_ssh_startup_timeout_seconds | default(180) }} || exit 1
 remove_ingress_dependents || exit 1
 docker compose up -d --force-recreate --no-deps clashrs || exit 1
-wait_healthy nitka-clashrs 60 || exit 1
+wait_healthy nitka-clashrs {{ ingress_clash_startup_timeout_seconds | default(180) }} || exit 1
 docker compose up -d --force-recreate --no-deps xray || exit 1
 rc=0
 
