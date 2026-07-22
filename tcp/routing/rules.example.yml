@@ -35,3 +35,7 @@ ingress_xray_dns_direct_domains:
 ingress_xray_dns_direct_servers:
   - address: 1.1.1.1
     port: 853
+
+# Proxy-domain DNS is sent to Unbound on the egress node through the SSH tunnel.
+# If omitted, this list is derived from ingress_xray_reality_proxy_domains.
+# ingress_xray_dns_proxy_domains: []

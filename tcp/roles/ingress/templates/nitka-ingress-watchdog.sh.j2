@@ -71,6 +71,10 @@ check_once() {
     fi
 
     clash_health="$(health_status "$clash_container")"
+    if [ "$clash_health" = "starting" ]; then
+        log "${clash_container} health is starting; waiting for it to become healthy"
+        return 0
+    fi
     if [ "$clash_health" != "healthy" ]; then
         recreate_dependents "${clash_container} health is ${clash_health}"
         return 0

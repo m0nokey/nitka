@@ -7,6 +7,7 @@
 {% set xray_proxy_domains = ingress_xray_reality_proxy_domains | default([]) | unique | list %}
 {% set xray_proxy_ips = ingress_xray_reality_proxy_ips | default([]) | unique | list %}
 {% set xray_dns_direct_domains = ingress_xray_dns_direct_domains | default([]) | unique | list %}
+{% set xray_dns_proxy_domains = ingress_xray_dns_proxy_domains | default(xray_proxy_domains) | reject('in', xray_dns_direct_domains) | unique | list %}
 {
   "log": {
     "access": "none",
@@ -110,7 +111,17 @@
   ],
   "dns": {
     "queryStrategy": "UseIPv4",
+    "tag": "dns",
     "servers": [
+{% if xray_dns_proxy_domains | length > 0 %}
+      {
+        "address": "{{ ssh_tun_network_vpn_gateway_ipv4 }}",
+        "port": 53,
+        "domains": {{ xray_dns_proxy_domains | to_json }},
+        "skipFallback": true,
+        "finalQuery": true
+      },
+{% endif %}
 {% for server in ingress_xray_dns_direct_servers %}
       {
         "address": "{{ server.address }}"{% if server.port is defined %},
@@ -124,6 +135,12 @@
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["dns"],
+        "ip": ["{{ ssh_tun_network_vpn_gateway_ipv4 }}"],
+        "outboundTag": "proxy"
+      },
       {
         "type": "field",
         "network": "tcp,udp",
