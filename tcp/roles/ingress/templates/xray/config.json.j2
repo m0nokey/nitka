@@ -43,7 +43,11 @@
         },
         "xhttpSettings": {
           "path": {{ ingress_xray_obfs_path | to_json }},
-          "mode": "packet-up"
+          "mode": "packet-up",
+          "extra": {
+            "scMaxEachPostBytes": 1000000,
+            "scMaxBufferedPosts": 30
+          }
         }
       },
       "sniffing": {

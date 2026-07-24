@@ -375,15 +375,6 @@ image_label() {
     docker image inspect "$image" --format "{{ index .Config.Labels \"$label\" }}" 2>/dev/null || true
 }
 
-github_latest_release_tag() {
-    local repo="$1"
-    curl -fsSL \
-        --connect-timeout 10 \
-        --max-time 30 \
-        "https://api.github.com/repos/${repo}/releases/latest" \
-    | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9]+)".*/\1/p'
-}
-
 configured_updater_image() {
     local service="$1" file="${tcp_dir}/group_vars/ingress.yml"
     awk -v service="$service" '
@@ -428,7 +419,7 @@ print_update_check_line() {
 
     if [[ "$current_no_v" == "$latest_no_v" ]]; then
         status="current"
-    elif [[ "$current_tag" == "latest" || "$current_tag" == "Alpha" ]]; then
+    elif [[ "$current_tag" == "latest" || "$current_tag" == "auto" || "$current_tag" == "Alpha" ]]; then
         status="floating-tag"
     else
         status="update-available"
@@ -442,7 +433,7 @@ check_updates() {
 
     xray_image="$(configured_updater_image xray)"
     clashrs_image="$(configured_updater_image clashrs)"
-    xray_latest="$(github_latest_release_tag XTLS/Xray-core || true)"
+    xray_latest="latest"
     clashrs_latest="latest"
 
     ui_title "Update Check"
@@ -451,7 +442,7 @@ check_updates() {
     print_update_check_line "xray" "$xray_image" "$xray_latest"
     print_update_check_line "clash-rs" "$clashrs_image" "$clashrs_latest"
 
-    xray_latest_image="ghcr.io/xtls/xray-core:$(without_v_prefix "$xray_latest")"
+    xray_latest_image="ghcr.io/xtls/xray-core:latest"
     clashrs_latest_image="ghcr.io/watfaq/clash-rs:${clashrs_latest}"
 
     printf '\nManual verification commands\n'
@@ -465,7 +456,7 @@ check_updates() {
         printf 'docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/ aquasec/trivy:latest image --severity HIGH,CRITICAL --ignore-unfixed %s\n\n' "$clashrs_latest_image"
     fi
 
-    printf 'After testing, update the pinned image tag in Ansible and deploy ingress deliberately.\n'
+    printf 'Xray uses the mutable latest tag and is refreshed by the scheduled updater.\n'
 }
 
 ansible_runner_image_current() {
@@ -1568,7 +1559,7 @@ system_base_docker_updater_services:
     image_type: external
     image: local/xray-core:auto
     release_repo: XTLS/Xray-core
-    release_image_template: ghcr.io/xtls/xray-core:{tag_no_v}
+    release_image_template: ghcr.io/xtls/xray-core:latest
 EOF
 
     : > "${tcp_dir}/group_vars/egress.yml"

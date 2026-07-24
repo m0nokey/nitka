@@ -121,7 +121,18 @@ fi
 
 build_if_needed ssh_tun_client local/ssh-tun-client:latest ./ssh_tun_client || exit 1
 resolve_release_image clashrs Watfaq/clash-rs 'ghcr.io/watfaq/clash-rs:latest' local/clash-rs:latest || exit 1
-resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:{tag_no_v}' local/xray-core:auto || exit 1
+resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:latest' local/xray-core:auto || exit 1
+
+validate_reality_target() {
+    target={{ ingress_xray_obfs_host | quote }}
+    echo "validating REALITY target ${target}"
+    docker run --rm --network host local/xray-core:auto tls ping "$target" || {
+        echo "REALITY target validation failed: ${target}" >&2
+        return 1
+    }
+}
+
+validate_reality_target || exit 1
 
 # Keep the SSH tunnel container stable. Config changes are applied by recreating
 # only services that depend on its network namespace, so deploys do not tear down
