@@ -11,12 +11,28 @@ ingress_xray_block_ips:
   - 0.0.0.0/32
 
 ingress_xray_reality_direct_domains:
+  - domain:api.ipify.org
+  - domain:ifconfig.me
+  - domain:icanhazip.com
+  - domain:checkip.amazonaws.com
+  - domain:ipinfo.io
+  - domain:ident.me
+  - domain:cloudflare.com
+  - domain:www.cloudflare.com
   - domain:youtube.com
   - domain:youtu.be
 
 ingress_xray_reality_direct_ips: []
 
 ingress_xray_xhttp_direct_domains:
+  - domain:api.ipify.org
+  - domain:ifconfig.me
+  - domain:icanhazip.com
+  - domain:checkip.amazonaws.com
+  - domain:ipinfo.io
+  - domain:ident.me
+  - domain:cloudflare.com
+  - domain:www.cloudflare.com
   - domain:youtube.com
   - domain:youtu.be
 

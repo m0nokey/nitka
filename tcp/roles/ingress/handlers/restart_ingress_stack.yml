@@ -21,7 +21,6 @@
 
 - name: Reset ingress SSH connection after handler interruption
   ansible.builtin.meta: reset_connection
-  when: ingress_handler_run.unreachable | default(false)
 
 - name: Retry ingress stack ensure script from handler after SSH interruption
   become: true
