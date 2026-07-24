@@ -16,6 +16,21 @@ wait_healthy() {
     return 1
 }
 
+wait_shared_port() {
+    container="$1"
+    port="$2"
+    timeout="$3"
+    end=$((SECONDS + timeout))
+    while [ "$SECONDS" -lt "$end" ]; do
+        if docker exec "$container" sh -c \
+            "ss -ltn 2>/dev/null | grep -qE '[.:]${port}[[:space:]]'"; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
 build_if_needed() {
     service="$1"
     image="$2"
@@ -114,8 +129,20 @@ resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:{tag_no_v}' lo
 docker compose up -d --no-build --remove-orphans --no-deps ssh_tun_client || exit 1
 wait_healthy nitka-ssh-tun-client {{ ingress_ssh_startup_timeout_seconds | default(180) }} || exit 1
 remove_ingress_dependents || exit 1
-docker compose up -d --force-recreate --no-deps clashrs || exit 1
-wait_healthy nitka-clashrs {{ ingress_clash_startup_timeout_seconds | default(180) }} || exit 1
+
+start_clash() {
+    docker compose up -d --force-recreate --no-deps clashrs || return 1
+    wait_shared_port nitka-ssh-tun-client {{ ingress_clash_port }} 45 || return 1
+    wait_healthy nitka-clashrs {{ ingress_clash_startup_timeout_seconds | default(180) }} || return 1
+}
+
+if ! start_clash; then
+    echo "clashrs did not become ready; recreating it once" >&2
+    remove_ingress_dependents || exit 1
+    sleep 2
+    start_clash || exit 1
+fi
+
 docker compose up -d --force-recreate --no-deps xray || exit 1
 rc=0
 
