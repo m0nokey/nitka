@@ -52,7 +52,7 @@ system_base_docker_updater_services:
     image_type: external
     image: local/xray-core:auto
     release_repo: XTLS/Xray-core
-    release_image_template: ghcr.io/xtls/xray-core:{tag_no_v}
+    release_image_template: ghcr.io/xtls/xray-core:latest
 
 harden_ssh_initial_user: ingress
 harden_ssh_port: 22
