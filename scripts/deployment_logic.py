@@ -8,7 +8,6 @@ the services selected for that deployment.
 import re
 from copy import deepcopy
 
-
 SCHEMA_VERSION = 1
 TOPOLOGY_CASCADE = "cascade"
 ROLE_INGRESS = "ingress"
