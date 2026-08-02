@@ -33,6 +33,7 @@
     fi > "{{ cascade_ingress_state_dir }}/xhttp_uuid"
   args:
     creates: "{{ cascade_ingress_state_dir }}/xhttp_uuid"
+  when: cascade_ingress_xray_xhttp_uuid is not defined
   notify: Restart ingress stack
 
 - name: Generate reality UUID
@@ -48,6 +49,7 @@
     fi > "{{ cascade_ingress_state_dir }}/reality_uuid"
   args:
     creates: "{{ cascade_ingress_state_dir }}/reality_uuid"
+  when: cascade_ingress_xray_reality_uuid is not defined
   notify: Restart ingress stack
 
 - name: Generate xhttp port
@@ -63,6 +65,7 @@
     printf '%s\n' "$port" > "{{ cascade_ingress_state_dir }}/xhttp_port"
   args:
     creates: "{{ cascade_ingress_state_dir }}/xhttp_port"
+  when: cascade_ingress_xray_xhttp_port is not defined
   notify: Restart ingress stack
 
 - name: Generate reality port
@@ -78,6 +81,7 @@
     printf '%s\n' "$port" > "{{ cascade_ingress_state_dir }}/reality_port"
   args:
     creates: "{{ cascade_ingress_state_dir }}/reality_port"
+  when: cascade_ingress_xray_reality_port is not defined
   notify: Restart ingress stack
 
 - name: Generate reality short id
@@ -89,6 +93,7 @@
     openssl rand -hex 8 > "{{ cascade_ingress_state_dir }}/reality_short_id"
   args:
     creates: "{{ cascade_ingress_state_dir }}/reality_short_id"
+  when: cascade_ingress_xray_reality_short_id is not defined
   notify: Restart ingress stack
 
 - name: Generate reality keypair
@@ -125,6 +130,7 @@
     PY
   args:
     creates: "{{ cascade_ingress_state_dir }}/reality_private_key"
+  when: cascade_ingress_xray_reality_private_key is not defined
   notify: Restart ingress stack
 
 - name: Set generated Xray state file permissions
@@ -149,6 +155,7 @@
   ansible.builtin.set_fact:
     cascade_ingress_xray_xhttp_uuid: "{{ lookup('file', cascade_ingress_state_dir ~ '/xhttp_uuid') | trim }}"
   changed_when: false
+  when: cascade_ingress_xray_xhttp_uuid is not defined
 
 - name: Read reality UUID
   delegate_to: localhost
@@ -156,6 +163,7 @@
   ansible.builtin.set_fact:
     cascade_ingress_xray_reality_uuid: "{{ lookup('file', cascade_ingress_state_dir ~ '/reality_uuid') | trim }}"
   changed_when: false
+  when: cascade_ingress_xray_reality_uuid is not defined
 
 - name: Read xhttp port
   delegate_to: localhost
@@ -163,6 +171,7 @@
   ansible.builtin.set_fact:
     cascade_ingress_xray_xhttp_port: "{{ lookup('file', cascade_ingress_state_dir ~ '/xhttp_port') | trim }}"
   changed_when: false
+  when: cascade_ingress_xray_xhttp_port is not defined
 
 - name: Read reality port
   delegate_to: localhost
@@ -170,6 +179,7 @@
   ansible.builtin.set_fact:
     cascade_ingress_xray_reality_port: "{{ lookup('file', cascade_ingress_state_dir ~ '/reality_port') | trim }}"
   changed_when: false
+  when: cascade_ingress_xray_reality_port is not defined
 
 - name: Read reality short id
   delegate_to: localhost
@@ -177,6 +187,7 @@
   ansible.builtin.set_fact:
     cascade_ingress_xray_reality_short_id: "{{ lookup('file', cascade_ingress_state_dir ~ '/reality_short_id') | trim }}"
   changed_when: false
+  when: cascade_ingress_xray_reality_short_id is not defined
 
 - name: Read reality public key
   delegate_to: localhost
@@ -184,6 +195,7 @@
   ansible.builtin.set_fact:
     cascade_ingress_xray_reality_public_key: "{{ lookup('file', cascade_ingress_state_dir ~ '/reality_public_key') | trim }}"
   changed_when: false
+  when: cascade_ingress_xray_reality_public_key is not defined
 
 - name: Validate reality keypair consistency
   delegate_to: localhost
@@ -218,6 +230,7 @@
         raise SystemExit("reality private/public key mismatch")
     PY
   changed_when: false
+  when: cascade_ingress_xray_reality_private_key is not defined
 
 - name: Build ingress share links
   delegate_to: localhost

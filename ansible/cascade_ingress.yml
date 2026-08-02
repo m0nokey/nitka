@@ -6,6 +6,7 @@
   roles:
     - role: system_base
       vars:
+        system_base_deploy_authorized_key: "{{ cascade_ingress_deploy_authorized_key }}"
         system_base_docker_updater_name: "{{ cascade_ingress_updater_name | default('cascade-ingress') }}"
         system_base_docker_updater_compose_file: "{{ cascade_ingress_remote_dir }}/compose.yml"
     - role: cascade_ssh_tun

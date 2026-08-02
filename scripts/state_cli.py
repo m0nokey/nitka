@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from deployment_logic import attach_cascade
+from deployment_logic import attach_cascade, cascade_ansible_vars
 from nacl.public import PrivateKey
 from state_logic import generated_port, generated_vpn_ports
 
@@ -88,7 +88,15 @@ def deploy_key():
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("action", choices=("count", "names", "extract", "mark-deployed", "set-management-key", "set-ssh-host-key", "set-bootstrap", "set-dns-profile", "set-local-region", "remove-node", "add-node", "add-cascade", "add-key", "add-keys", "remove-key", "remove-all-keys"))
+parser.add_argument(
+    "action",
+    choices=(
+        "count", "names", "extract", "extract-cascade", "mark-deployed",
+        "set-management-key", "set-ssh-host-key", "set-bootstrap",
+        "set-dns-profile", "set-local-region", "remove-node", "add-node",
+        "add-cascade", "add-key", "add-keys", "remove-key", "remove-all-keys",
+    ),
+)
 parser.add_argument("args", nargs="*")
 parser.add_argument("--bootstrap-key")
 parser.add_argument("--server-name", default="github.com")
@@ -114,6 +122,7 @@ parser.add_argument(
     default="",
     help="comma-separated ISO alpha-2 country codes",
 )
+parser.add_argument("--cascade-local-root", default="")
 opts = parser.parse_args()
 state = read_state()
 nodes = state.setdefault("nodes", {})
@@ -155,6 +164,16 @@ elif opts.action == "mark-deployed":
     node = nodes[opts.args[0]]
     node["bootstrap_private_key"] = ""
     node["management_port"] = node["ssh_port"]
+elif opts.action == "extract-cascade":
+    if len(opts.args) != 1:
+        raise SystemExit("extract-cascade requires DEPLOYMENT_ID")
+    local_root = opts.cascade_local_root or str(
+        Path(os.environ.get("XDG_STATE_HOME", "/tmp")) / "xray" / "cascade"
+    )
+    output = cascade_ansible_vars(state, opts.args[0], local_root)
+    json.dump(output, sys.stdout, indent=2)
+    print()
+    raise SystemExit(0)
 elif opts.action == "set-management-key":
     if len(opts.args) != 3 or opts.args[0] not in nodes:
         raise SystemExit("set-management-key requires NODE PRIVATE_KEY PUBLIC_KEY")

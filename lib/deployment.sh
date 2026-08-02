@@ -449,6 +449,192 @@ run_node_playbook() {
     return "$rc"
 }
 
+run_cascade_playbooks() {
+    local deployment_id="$1" state_file="${2:-}" before extra inventory inventory_dir
+    local known_hosts_file ingress_known_hosts egress_known_hosts ingress_key egress_key
+    local ingress_node egress_node ingress_host egress_host ingress_port egress_port
+    local ingress_user egress_user rc
+    before="$(mktemp)"
+    extra="$(mktemp)"
+    inventory_dir="$(mktemp -d /tmp/xray-cascade-inventory.XXXXXX)"
+    inventory="$inventory_dir/hosts.yml"
+    known_hosts_file="$inventory_dir/known_hosts"
+    ingress_known_hosts="$inventory_dir/ingress_known_hosts"
+    egress_known_hosts="$inventory_dir/egress_known_hosts"
+    ingress_key="$inventory_dir/ingress_key"
+    egress_key="$inventory_dir/egress_key"
+
+    if [[ -n "$state_file" ]]; then
+        cp "$state_file" "$before"
+    else
+        read_vault_state "$before" || {
+            rm -f "$before" "$extra"
+            rm -rf "$inventory_dir"
+            return 1
+        }
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+        --cascade-local-root "$STATE_DIR/cascade" \
+        extract-cascade "$deployment_id" <"$before" >"$extra"; then
+        rm -f "$before" "$extra"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
+
+    ingress_node="$(python3 - "$deployment_id" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+deployment = state["deployments"][sys.argv[1]]
+print(deployment["roles"]["ingress"]["node"])
+PY
+)"
+    egress_node="$(python3 - "$deployment_id" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+deployment = state["deployments"][sys.argv[1]]
+print(deployment["roles"]["egress"]["node"])
+PY
+)"
+    ingress_host="$(python3 - "$ingress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["host"])
+PY
+)"
+    egress_host="$(python3 - "$egress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["host"])
+PY
+)"
+    ingress_port="$(python3 - "$ingress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_port"])
+PY
+)"
+    egress_port="$(python3 - "$egress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_port"])
+PY
+)"
+    ingress_user="$(python3 - "$ingress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_user"])
+PY
+)"
+    egress_user="$(python3 - "$egress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_user"])
+PY
+)"
+    python3 - "$ingress_node" "$before" >"$ingress_key" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_private_key"], end="")
+PY
+    python3 - "$egress_node" "$before" >"$egress_key" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_private_key"], end="")
+PY
+    chmod 600 "$ingress_key" "$egress_key"
+    if ! write_node_known_hosts "$before" "$ingress_node" "$ingress_known_hosts"; then
+        rm -f "$before" "$extra" "$ingress_key" "$egress_key"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
+    if ! write_node_known_hosts "$before" "$egress_node" "$egress_known_hosts"; then
+        rm -f "$before" "$extra" "$ingress_key" "$egress_key"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
+    cat "$ingress_known_hosts" "$egress_known_hosts" >"$known_hosts_file"
+    chmod 600 "$known_hosts_file"
+
+    printf '%s\n' \
+        "---" \
+        "all:" \
+        "  children:" \
+        "    cascade_ingress:" \
+        "      hosts:" \
+        "        $ingress_node:" \
+        "          ansible_host: $ingress_host" \
+        "          ansible_user: $ingress_user" \
+        "          ansible_port: $ingress_port" \
+        "          ansible_ssh_private_key_file: $ingress_key" \
+        "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" \
+        "    cascade_egress:" \
+        "      hosts:" \
+        "        $egress_node:" \
+        "          ansible_host: $egress_host" \
+        "          ansible_user: $egress_user" \
+        "          ansible_port: $egress_port" \
+        "          ansible_ssh_private_key_file: $egress_key" \
+        "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" \
+        >"$inventory"
+    chmod 600 "$inventory"
+
+    if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_egress.yml"; then
+        :
+    else
+        rc=$?
+        rm -f "$before" "$extra" "$ingress_key" "$egress_key"
+        rm -rf "$inventory_dir"
+        return "$rc"
+    fi
+    if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_ingress.yml"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    rm -f "$before" "$extra" "$ingress_key" "$egress_key"
+    rm -rf "$inventory_dir"
+    return "$rc"
+}
+
+create_cascade_deployment() {
+    local deployment_id="$1" ingress_node="$2" egress_node="$3"
+    local before after rc
+    before="$(mktemp)"
+    after="$(mktemp)"
+    if ! read_vault_state "$before"; then
+        rm -f "$before" "$after"
+        return 1
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" add-cascade \
+        "$deployment_id" "$ingress_node" "$egress_node" <"$before" >"$after"; then
+        rm -f "$before" "$after"
+        return 1
+    fi
+    if run_cascade_playbooks "$deployment_id" "$after"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if ((rc == 0)) && ! vault_save "$after"; then
+        printf '%s\n' "Cascade was deployed, but the encrypted Vault could not be updated." >&2
+        rc=1
+    fi
+    rm -f "$before" "$after"
+    return "$rc"
+}
+
 run_remove_with_management_key() {
     local node="$1" before extra inventory inventory_dir key_file host user port private_key rc pipeline_owned=0
     before="$(mktemp)"

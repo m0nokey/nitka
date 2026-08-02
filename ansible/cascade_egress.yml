@@ -6,6 +6,7 @@
   roles:
     - role: system_base
       vars:
+        system_base_deploy_authorized_key: "{{ cascade_egress_deploy_authorized_key }}"
         system_base_docker_updater_name: "{{ cascade_egress_updater_name | default('cascade-egress') }}"
         system_base_docker_updater_compose_file: "{{ cascade_egress_remote_dir }}/compose.yml"
     - role: cascade_ssh_tun

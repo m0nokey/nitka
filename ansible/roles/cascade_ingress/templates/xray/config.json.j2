@@ -36,7 +36,11 @@
           "show": false,
           "target": {{ (cascade_ingress_xray_obfs_host ~ ':443') | to_json }},
           "serverNames": [{{ cascade_ingress_xray_obfs_host | to_json }}],
+          {% if cascade_ingress_xray_reality_private_key is defined %}
+          "privateKey": {{ cascade_ingress_xray_reality_private_key | to_json }},
+          {% else %}
           "privateKey": "{{ lookup('file', cascade_ingress_state_dir ~ '/reality_private_key') | trim }}",
+          {% endif %}
           "shortIds": ["{{ cascade_ingress_xray_reality_short_id }}"],
           "xver": 0,
           "fingerprint": "chrome"
@@ -78,7 +82,11 @@
           "show": false,
           "target": {{ (cascade_ingress_xray_obfs_host ~ ':443') | to_json }},
           "serverNames": [{{ cascade_ingress_xray_obfs_host | to_json }}],
+          {% if cascade_ingress_xray_reality_private_key is defined %}
+          "privateKey": {{ cascade_ingress_xray_reality_private_key | to_json }},
+          {% else %}
           "privateKey": "{{ lookup('file', cascade_ingress_state_dir ~ '/reality_private_key') | trim }}",
+          {% endif %}
           "shortIds": ["{{ cascade_ingress_xray_reality_short_id }}"],
           "xver": 0,
           "fingerprint": "chrome"

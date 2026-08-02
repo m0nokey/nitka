@@ -520,17 +520,19 @@ while true; do
     echo
     menu_option 1 "VPN servers"
     menu_option 2 "Add VPN server"
-    menu_option 3 Vault
+    menu_option 3 "Cascade VPN"
+    menu_option 4 Vault
     echo
     menu_control i info
     menu_control x exit
     echo
-    if ! read_required_choice choice '?: ' '1, 2, 3, i, or x'; then continue; fi
+    if ! read_required_choice choice '?: ' '1, 2, 3, 4, i, or x'; then continue; fi
     MAIN_MENU_REQUESTED=0
     case "$choice" in
         1) vpn_servers || true ;;
         2) add_node || true ;;
-        3) secure_state || true ;;
+        3) cascade_deployments || true ;;
+        4) secure_state || true ;;
         i) show_info general ;;
         x) exit_tui ;;
         *) invalid_choice ;;

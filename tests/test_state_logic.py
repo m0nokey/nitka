@@ -210,6 +210,32 @@ class StateCliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("egress node not found", result.stderr)
 
+    def test_extract_cascade_builds_ansible_variables(self):
+        state = self.fixture_state()
+        state["nodes"]["node-a"]["xray"].update({
+            "reality_private_key": "private-reality-key",
+            "reality_public_key": "public-reality-key",
+            "reality_short_id": "0123456789abcdef",
+            "server_name": "example.com",
+        })
+        state["nodes"]["node-b"] = {
+            "host": "192.0.2.20",
+            "management_authorized_key": "ssh-ed25519 egress",
+            "xray": {"access_keys": []},
+        }
+        state = self.run_cli(state, "add-cascade", "cascade-1", "node-a", "node-b")
+
+        variables = self.run_cli(
+            state,
+            "--cascade-local-root",
+            "/state/xray/cascade",
+            "extract-cascade",
+            "cascade-1",
+        )
+
+        self.assertEqual(variables["cascade_ingress_local_dir"], "/state/xray/cascade/cascade-1/ingress")
+        self.assertEqual(variables["cascade_egress_deploy_authorized_key"], "ssh-ed25519 egress")
+
 
 if __name__ == "__main__":
     unittest.main()

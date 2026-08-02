@@ -5,6 +5,7 @@ from scripts.deployment_logic import (
     BACKEND_XRAY,
     TRANSPORT_EXISTING_XRAY,
     attach_cascade,
+    cascade_ansible_vars,
     cascade_deployment,
     validate_deployments,
 )
@@ -59,6 +60,53 @@ class DeploymentLogicTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "deployment node not found"):
             validate_deployments(state)
+
+    def test_cascade_ansible_vars_map_existing_xray_state(self):
+        state = {
+            "nodes": {
+                "ingress-node": {
+                    "host": "192.0.2.10",
+                    "management_authorized_key": "ssh-ed25519 ingress",
+                    "xray": {
+                        "vision_port": 443,
+                        "xhttp_port": 23457,
+                        "reality_private_key": "private-reality-key",
+                        "reality_public_key": "public-reality-key",
+                        "reality_short_id": "0123456789abcdef",
+                        "server_name": "example.com",
+                        "access_keys": [{
+                            "vision_uuid": "11111111-1111-4111-8111-111111111111",
+                            "xhttp_uuid": "22222222-2222-4222-8222-222222222222",
+                        }],
+                    },
+                },
+                "egress-node": {
+                    "host": "192.0.2.20",
+                    "management_authorized_key": "ssh-ed25519 egress",
+                },
+            }
+        }
+        state = attach_cascade(state, "cascade-1", "ingress-node", "egress-node")
+
+        variables = cascade_ansible_vars(state, "cascade-1", "/state/xray/cascade")
+
+        self.assertEqual(variables["system_base_deploy_user"], "deploy")
+        self.assertEqual(
+            variables["cascade_ingress_deploy_authorized_key"],
+            "ssh-ed25519 ingress",
+        )
+        self.assertEqual(
+            variables["cascade_egress_remote_dir"],
+            "/opt/nitka/cascade/egress",
+        )
+        self.assertEqual(
+            variables["cascade_ingress_xray_reality_uuid"],
+            "11111111-1111-4111-8111-111111111111",
+        )
+        self.assertEqual(
+            variables["cascade_ssh_tun_public_host"],
+            "192.0.2.20",
+        )
 
 
 if __name__ == "__main__":
