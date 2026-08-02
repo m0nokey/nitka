@@ -28,7 +28,7 @@ def node_status(node, diagnostics=None):
 def deployment_data(state, deployment_id):
     deployment = state.get("deployments", {}).get(deployment_id)
     if not isinstance(deployment, dict):
-        raise ValueError(f"deployment not found: {deployment_id}")
+        raise TypeError(f"deployment not found: {deployment_id}")
     nodes = state.get("nodes", {})
     roles = deployment.get("roles", {})
     result = []
@@ -36,7 +36,7 @@ def deployment_data(state, deployment_id):
         node_name = roles.get(role, {}).get("node")
         node = nodes.get(node_name)
         if not isinstance(node, dict):
-            raise ValueError(f"deployment node not found: {deployment_id}/{role}")
+            raise TypeError(f"deployment node not found: {deployment_id}/{role}")
         result.append((role, node))
     return result
 

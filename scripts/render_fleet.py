@@ -68,9 +68,7 @@ def render(state, diagnostics=None):
     print()
     print("   IP              STATUS   COUNTRY   CREATED      MODE              PROVIDER")
     print()
-    number = 0
-    for kind, _, first, second in items:
-        number += 1
+    for number, (kind, _, first, second) in enumerate(items, 1):
         first_mode = "Cascade ingress" if kind == "cascade" else first.get("mode", "Xray")
         first_values = (
             first.get("host", "N/A"),
