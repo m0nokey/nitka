@@ -1,0 +1,25 @@
+---
+- name: Check Xray VPN node resources
+  hosts: xray_nodes
+  gather_facts: false
+  pre_tasks:
+    - name: Wait for VPS SSH access
+      ansible.builtin.wait_for_connection:
+        delay: 2
+        timeout: 9
+        sleep: 1
+    - name: Gather VPS facts after SSH is available
+      ansible.builtin.setup:
+  tasks:
+    - name: Require Debian
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == "Debian"
+        fail_msg: "Nitka supports Debian only."
+
+    - name: Report VPS resources
+      ansible.builtin.debug:
+        msg: >-
+          XRAY_RESOURCE_FACTS
+          vcpus={{ ansible_facts.processor_vcpus }}
+          ram_mb={{ ansible_facts.memtotal_mb }}

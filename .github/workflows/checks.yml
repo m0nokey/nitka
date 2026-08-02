@@ -1,0 +1,237 @@
+name: Checks
+
+on:
+  push:
+    branches:
+      - '**'
+    paths-ignore:
+      - 'README.md'
+  pull_request:
+    paths-ignore:
+      - 'README.md'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    env:
+      ANSIBLE_LOCAL_TEMP: /tmp/ansible-local
+      ANSIBLE_SSH_CONTROL_PATH_DIR: /tmp/ansible-cp
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+
+      - name: Install check tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y shellcheck
+          python -m pip install --disable-pip-version-check \
+            ansible-core ansible-lint yamllint ruff pynacl
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Check Bash syntax
+        run: |
+          bash -n controller/entrypoint.sh
+          bash -n lib/*.sh
+          bash -n run.sh
+          bash -n tests/test_navigation.sh
+          bash -n tests/test_vault_recovery.sh
+          bash -n tests/test_ansible_templates.sh
+
+      - name: Run ShellCheck
+        run: >-
+          shellcheck --severity=error controller/entrypoint.sh lib/*.sh run.sh
+          tests/test_navigation.sh tests/test_vault_recovery.sh
+          tests/test_ansible_templates.sh
+
+      - name: Run TUI navigation smoke test
+        run: bash tests/test_navigation.sh
+
+      - name: Run Vault recovery tests
+        run: bash tests/test_vault_recovery.sh
+
+      - name: Check Python syntax
+        run: python -m compileall -q scripts
+
+      - name: Run Python state tests
+        run: >-
+          python -m unittest discover --start-directory tests
+          --pattern 'test_*.py' --verbose
+
+      - name: Run Ansible template tests
+        run: bash tests/test_ansible_templates.sh
+
+      - name: Run Ruff
+        run: ruff check scripts
+
+      - name: Run YAML lint
+        run: yamllint -d relaxed ansible tests/ansible .github/ci .github/workflows
+
+      - name: Check Ansible syntax
+        run: |
+          for playbook in \
+            ansible/bootstrap.yml \
+            ansible/harden_ssh.yml \
+            ansible/preflight.yml \
+            ansible/remove.yml \
+            ansible/restart.yml \
+            ansible/rotate-ssh.yml \
+            ansible/site.yml; do
+            ansible-playbook --syntax-check \
+              -i 'xray_nodes,' -c local "$playbook"
+          done
+
+      - name: Run Ansible lint
+        run: ansible-lint --offline --profile production ansible
+
+      - name: Check changed whitespace
+        run: git diff --check HEAD^ HEAD
+
+  container-security:
+    name: Container and configuration security
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Build controller image
+        run: docker build --pull --tag nitka:ci --file controller/Dockerfile .
+
+      - name: Build server Unbound image
+        run: >-
+          docker build --pull --tag nitka-unbound:ci
+          --file ansible/roles/xray/templates/unbound.Dockerfile.j2 .
+
+      - name: Smoke-test controller image
+        run: |
+          docker run --rm --entrypoint /bin/bash nitka:ci -lc '
+            set -euo pipefail
+            test "$(id -u)" != 0
+            command -v ansible-vault
+            command -v ssh-keygen
+            python3 -c "import nacl"
+            ansible-galaxy collection list | grep -F community.docker
+          '
+
+      - name: Smoke-test server Unbound image
+        run: |
+          docker run --rm --entrypoint /bin/sh nitka-unbound:ci -c '
+            set -e
+            id unbound
+            command -v unbound
+            command -v unbound-checkconf
+            test -x /usr/local/bin/healthcheck
+          '
+
+      - name: Validate Compose security settings
+        run: |
+          docker compose -f controller/compose.yml config --format json > compose.json
+          python3 - compose.json <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              service = json.load(stream)["services"]["nitka"]
+          assert service["read_only"] is True
+          assert service["cap_drop"] == ["ALL"]
+          assert "no-new-privileges:true" in service["security_opt"]
+          assert int(service["pids_limit"]) == 128
+          assert service["mem_limit"] in ("256m", "268435456", 268435456)
+          assert float(service["cpus"]) == 0.5
+          assert any(item.startswith("/tmp:") for item in service["tmpfs"])
+          assert all(
+              "docker.sock" not in volume.get("source", "")
+              for volume in service["volumes"]
+          )
+          PY
+
+      - name: Scan controller image with Trivy
+        # Pinned action commit and version comment exceed 80 columns.
+        # yamllint disable-line rule:line-length
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: nitka:ci
+          version: v0.72.0
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Report server Xray HIGH and CRITICAL findings
+        # yamllint disable-line rule:line-length
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ghcr.io/xtls/xray-core:latest
+          version: v0.72.0
+          format: table
+          # Keep the complete HIGH/CRITICAL report without blocking the job.
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Fail only on critical server Xray findings
+        # yamllint disable-line rule:line-length
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ghcr.io/xtls/xray-core:latest
+          version: v0.72.0
+          format: table
+          # HIGH findings are reported above; only CRITICAL may fail CI.
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL
+
+      - name: Scan server Unbound image with Trivy
+        # yamllint disable-line rule:line-length
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: nitka-unbound:ci
+          version: v0.72.0
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Scan repository with Trivy
+        # yamllint disable-line rule:line-length
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          version: v0.72.0
+          scanners: vuln,secret
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Scan repository configuration with Trivy
+        # yamllint disable-line rule:line-length
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          trivy-config: .github/ci/trivy.yaml
+          version: v0.72.0
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH

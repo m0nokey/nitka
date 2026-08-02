@@ -1,0 +1,333 @@
+---
+- name: Remove Xray VPN
+  hosts: xray_nodes
+  become: true
+  pre_tasks:
+    - name: Wait for SSH access
+      ansible.builtin.wait_for_connection:
+        delay: 2
+        timeout: 30
+        sleep: 2
+
+    - name: Check whether the current SSH configuration backup exists
+      ansible.builtin.stat:
+        path: /var/lib/nitka/backup/sshd_config
+      register: nitka_ssh_config_backup_current
+
+    - name: Check whether Nitka SSH hardening is still installed
+      ansible.builtin.stat:
+        path: /etc/ssh/sshd_config.d/90-nitka-hardening.conf
+      register: nitka_ssh_dropin
+
+    - name: Check whether the Xray Compose project still exists
+      ansible.builtin.stat:
+        path: /opt/xray/compose.yml
+      register: nitka_compose
+
+    - name: Detect a previously interrupted cleanup
+      ansible.builtin.set_fact:
+        nitka_partial_cleanup: >-
+          {{ not nitka_ssh_config_backup_current.stat.exists
+             and not nitka_ssh_dropin.stat.exists
+             and not nitka_compose.stat.exists }}
+
+    - name: Select the original SSH configuration backup
+      ansible.builtin.set_fact:
+        nitka_ssh_config_backup_path: >-
+          /var/lib/nitka/backup/sshd_config
+
+    - name: Require an original SSH configuration backup
+      ansible.builtin.assert:
+        that:
+          - >-
+            nitka_ssh_config_backup_current.stat.exists
+            or nitka_partial_cleanup
+        fail_msg: >-
+          The original SSH configuration backup is missing. Remote cleanup was
+          stopped to avoid leaving the VPS locked to Nitka SSH settings.
+  tasks:
+    - name: Check whether the Xray Compose project exists
+      ansible.builtin.stat:
+        path: /opt/xray/compose.yml
+      register: xray_compose
+
+    - name: Remove the Xray Compose project
+      community.docker.docker_compose_v2:
+        project_src: /opt/xray
+        files:
+          - compose.yml
+        state: absent
+        remove_orphans: true
+        remove_images: all
+        remove_volumes: true
+      when: xray_compose.stat.exists
+
+    - name: Remove Xray files
+      ansible.builtin.file:
+        path: /opt/xray
+        state: absent
+
+    - name: Stop Nitka updater services
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemctl disable --now \
+          xray-docker-updater.timer \
+          xray-docker-updater.service 2>/dev/null || true
+        systemctl disable --now \
+          nitka-os-updater.timer \
+          nitka-os-updater.service 2>/dev/null || true
+        systemctl stop \
+          nitka-ssh-rollback.timer \
+          nitka-ssh-rollback.service 2>/dev/null || true
+        systemctl reset-failed \
+          nitka-ssh-rollback.timer \
+          nitka-ssh-rollback.service 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Remove Nitka updater files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/sbin/xray-docker-updater
+        - /etc/systemd/system/xray-docker-updater.service
+        - /etc/systemd/system/xray-docker-updater.timer
+        - /usr/local/sbin/nitka-os-updater
+        - /etc/logrotate.d/nitka-os-updater
+        - /etc/systemd/system/nitka-os-updater.service
+        - /etc/systemd/system/nitka-os-updater.timer
+
+    - name: Reload systemd after removing Nitka units
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Stop and disable Docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove Docker bridge interfaces
+      ansible.builtin.shell: |
+        set -euo pipefail
+        bridges="$(
+          ip -o link show |
+            awk -F': ' '$2 == "docker0" || $2 ~ /^br-[0-9a-f]{12}$/ {print $2}'
+        )"
+        if [[ -n "$bridges" ]]; then
+          while IFS= read -r bridge; do
+            [[ -n "$bridge" ]] || continue
+            ip link delete "$bridge" type bridge
+          done <<< "$bridges"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Remove Docker packages installed for the VPN stack
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+          - python3-docker
+        state: absent
+        purge: true
+        autoremove: true
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Remove Docker runtime data and configuration
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/docker
+        - /var/lib/containerd
+        - /etc/docker
+        - /etc/containerd
+
+    - name: Remove the Docker group created for the VPN stack
+      ansible.builtin.group:
+        name: docker
+        state: absent
+      failed_when: false
+
+    - name: Remove Docker APT integration
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/docker.sources
+        - /etc/apt/preferences.d/docker
+        - /etc/apt/keyrings/docker.gpg
+
+    - name: Remove updater configuration installed by Nitka
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/apt.conf.d/50unattended-upgrades
+        - /etc/apt/apt.conf.d/20auto-upgrades
+        - /var/log/nitka-os-updater.log
+
+    - name: Remove updater packages installed by Nitka
+      ansible.builtin.apt:
+        name:
+          - unattended-upgrades
+          - apt-listchanges
+        state: absent
+        purge: true
+        autoremove: true
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Stop SSH rollback units before restoring the original configuration
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemctl stop \
+          nitka-ssh-rollback.timer \
+          nitka-ssh-rollback.service 2>/dev/null || true
+        systemctl reset-failed \
+          nitka-ssh-rollback.timer \
+          nitka-ssh-rollback.service 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Remove Nitka SSH drop-in
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/90-nitka-hardening.conf
+        state: absent
+
+    - name: Restore the original sshd_config
+      ansible.builtin.copy:
+        src: "{{ nitka_ssh_config_backup_path }}"
+        dest: /etc/ssh/sshd_config
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      when: nitka_ssh_config_backup_current.stat.exists
+
+    - name: Validate the restored SSH configuration
+      ansible.builtin.command:
+        cmd: /usr/sbin/sshd -t -f /etc/ssh/sshd_config
+      changed_when: false
+
+    - name: Check whether original SSH host keys were backed up
+      ansible.builtin.stat:
+        path: /var/lib/nitka/.ssh-host-keys-backed-up
+      register: nitka_host_keys_backup
+
+    - name: Restore original SSH host keys
+      ansible.builtin.shell: |
+        set -euo pipefail
+        find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*' -delete
+        cp -a /var/lib/nitka/ssh-host-keys/. /etc/ssh/
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: nitka_host_keys_backup.stat.exists
+
+    - name: Reload SSH after restoring the original configuration
+      ansible.builtin.shell: |
+        set -euo pipefail
+        systemctl reload ssh || systemctl reload sshd
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Check whether Nitka created the deploy user
+      ansible.builtin.stat:
+        path: /var/lib/nitka/.deploy-user-created
+      register: nitka_deploy_user_marker
+
+
+    - name: Check whether the current sources.list backup exists
+      ansible.builtin.stat:
+        path: /var/lib/nitka/backup/sources.list
+      register: nitka_sources_list_backup_current
+
+    - name: Select the original sources.list backup
+      ansible.builtin.set_fact:
+        nitka_sources_list_backup_path: /var/lib/nitka/backup/sources.list
+
+    - name: Restore the original sources.list when it was backed up
+      ansible.builtin.copy:
+        src: "{{ nitka_sources_list_backup_path }}"
+        dest: /etc/apt/sources.list
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      when:
+        - ansible_facts.os_family == "Debian"
+        - nitka_sources_list_backup_current.stat.exists
+
+    - name: Remove Nitka APT source files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/debian.sources
+
+    - name: Stop remaining deploy-user processes before removing the user
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if id deploy >/dev/null 2>&1; then
+          pkill -TERM -u deploy 2>/dev/null || true
+          sleep 1
+          pkill -KILL -u deploy 2>/dev/null || true
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when:
+        - nitka_deploy_user_marker.stat.exists or nitka_partial_cleanup
+        - (ansible_user | default('')) != 'deploy'
+
+    - name: Remove deploy user created by Nitka
+      ansible.builtin.user:
+        name: deploy
+        state: absent
+        remove: true
+        force: true
+      when:
+        - nitka_deploy_user_marker.stat.exists or nitka_partial_cleanup
+        - (ansible_user | default('')) != 'deploy'
+
+    - name: Remove deploy group created by Nitka
+      ansible.builtin.group:
+        name: deploy
+        state: absent
+      when:
+        - nitka_deploy_user_marker.stat.exists or nitka_partial_cleanup
+        - (ansible_user | default('')) != 'deploy'
+
+    - name: Remove deploy sudoers file
+      ansible.builtin.file:
+        path: /etc/sudoers.d/deploy
+        state: absent
+
+    - name: Remove Nitka backup and marker files after cleanup
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/ssh/.nitka-ed25519-host-key
+        - /var/lib/nitka/.ssh-host-keys-backed-up
+        - /var/lib/nitka/.deploy-user-created
+        - /var/lib/nitka/ssh-host-keys
+        - /var/lib/nitka/backup
+      when: (ansible_user | default('')) != 'deploy'
+
+    - name: Remove Nitka state directory after cleanup
+      ansible.builtin.file:
+        path: /var/lib/nitka
+        state: absent
+      when: (ansible_user | default('')) != 'deploy'

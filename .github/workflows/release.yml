@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Run CI before release
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+
+  release:
+    name: Build and publish release
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: >-
+            ${{ github.event_name == 'workflow_dispatch'
+                && inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Build release archive
+        env:
+          RELEASE_TAG: >-
+            ${{ github.event_name == 'workflow_dispatch'
+                && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          archive="nitka-${RELEASE_TAG}.tar.gz"
+          latest_archive="nitka-latest.tar.gz"
+          root="nitka-${RELEASE_TAG}"
+          staging="$(mktemp -d)"
+          trap 'rm -rf "$staging"' EXIT
+
+          mkdir -p "$staging/$root"
+          git archive --format=tar "$RELEASE_TAG" \
+            | tar -xf - -C "$staging/$root"
+
+          (
+            cd "$staging/$root"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS
+          )
+
+          tar -C "$staging" -czf "$archive" "$root"
+          cp -- "$archive" "$latest_archive"
+
+          printf 'RELEASE_ARCHIVE=%s\n' "$archive" >> "$GITHUB_ENV"
+          printf 'RELEASE_LATEST_ARCHIVE=%s\n' \
+            "$latest_archive" >> "$GITHUB_ENV"
+          printf 'RELEASE_CONTROLLER_SBOM=%s\n' \
+            "nitka-${RELEASE_TAG}-controller.sbom.spdx.json" >> "$GITHUB_ENV"
+          printf 'RELEASE_UNBOUND_SBOM=%s\n' \
+            "nitka-${RELEASE_TAG}-unbound.sbom.spdx.json" >> "$GITHUB_ENV"
+          printf 'RELEASE_XRAY_SBOM=%s\n' \
+            "nitka-${RELEASE_TAG}-xray.sbom.spdx.json" >> "$GITHUB_ENV"
+
+      - name: Build runtime images for SBOM generation
+        run: |
+          docker build --pull --tag nitka:release --file controller/Dockerfile .
+          docker build --pull --tag nitka-unbound:release \
+            --file ansible/roles/xray/templates/unbound.Dockerfile.j2 .
+
+      - name: Generate controller image SBOM
+        # Pinned release commit; current release is v0.24.0.
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: nitka:release
+          format: spdx-json
+          output-file: ${{ env.RELEASE_CONTROLLER_SBOM }}
+          artifact-name: ${{ env.RELEASE_CONTROLLER_SBOM }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate Unbound image SBOM
+        # Pinned release commit; current release is v0.24.0.
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: nitka-unbound:release
+          format: spdx-json
+          output-file: ${{ env.RELEASE_UNBOUND_SBOM }}
+          artifact-name: ${{ env.RELEASE_UNBOUND_SBOM }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate Xray image SBOM
+        # Pinned release commit; current release is v0.24.0.
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ghcr.io/xtls/xray-core:latest
+          format: spdx-json
+          output-file: ${{ env.RELEASE_XRAY_SBOM }}
+          artifact-name: ${{ env.RELEASE_XRAY_SBOM }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Create release checksum manifest
+        run: |
+          sha256sum \
+            "$RELEASE_ARCHIVE" \
+            "$RELEASE_LATEST_ARCHIVE" \
+            "$RELEASE_CONTROLLER_SBOM" \
+            "$RELEASE_UNBOUND_SBOM" \
+            "$RELEASE_XRAY_SBOM" > SHA256SUMS
+
+      - name: Attest release assets
+        # Pinned release commit; current release is v4.1.0.
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: |
+            ${{ github.workspace }}/${{ env.RELEASE_ARCHIVE }}
+            ${{ github.workspace }}/${{ env.RELEASE_LATEST_ARCHIVE }}
+            ${{ github.workspace }}/${{ env.RELEASE_CONTROLLER_SBOM }}
+            ${{ github.workspace }}/${{ env.RELEASE_UNBOUND_SBOM }}
+            ${{ github.workspace }}/${{ env.RELEASE_XRAY_SBOM }}
+            ${{ github.workspace }}/SHA256SUMS
+
+      - name: Create GitHub release and upload assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: >-
+            ${{ github.event_name == 'workflow_dispatch'
+                && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          notes_file=".github/RELEASE_NOTES_${RELEASE_TAG}.md"
+          notes_body=""
+          if [[ -f "$notes_file" ]]; then
+            notes_body="$(cat "$notes_file")"
+          fi
+          release_payload="$(jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg body "$notes_body" \
+            '{tag_name: $tag, name: $tag, generate_release_notes: true} +
+             (if $body == "" then {} else {body: $body} end)')"
+          release="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --header "Content-Type: application/json" \
+            --data "$release_payload" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases")"
+          upload_url="$(jq -er '.upload_url | sub("\\{.*$"; "")' <<<"$release")"
+
+          for asset in \
+            "$RELEASE_ARCHIVE" \
+            "$RELEASE_LATEST_ARCHIVE" \
+            "$RELEASE_CONTROLLER_SBOM" \
+            "$RELEASE_UNBOUND_SBOM" \
+            "$RELEASE_XRAY_SBOM" \
+            SHA256SUMS; do
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GITHUB_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --header "Content-Type: application/octet-stream" \
+              --data-binary "@$asset" \
+              "$upload_url?name=$(basename "$asset")" >/dev/null
+          done
