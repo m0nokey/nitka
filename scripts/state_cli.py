@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from nacl.public import PrivateKey
+from deployment_logic import attach_cascade
 from state_logic import generated_port, generated_vpn_ports
 
 COUNTRIES_FILE = Path(__file__).resolve().parent.parent / "data" / "countries.tsv"
@@ -87,7 +88,7 @@ def deploy_key():
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("action", choices=("count", "names", "extract", "mark-deployed", "set-management-key", "set-ssh-host-key", "set-bootstrap", "set-dns-profile", "set-local-region", "remove-node", "add-node", "add-key", "add-keys", "remove-key", "remove-all-keys"))
+parser.add_argument("action", choices=("count", "names", "extract", "mark-deployed", "set-management-key", "set-ssh-host-key", "set-bootstrap", "set-dns-profile", "set-local-region", "remove-node", "add-node", "add-cascade", "add-key", "add-keys", "remove-key", "remove-all-keys"))
 parser.add_argument("args", nargs="*")
 parser.add_argument("--bootstrap-key")
 parser.add_argument("--server-name", default="github.com")
@@ -292,6 +293,10 @@ elif opts.action == "add-node":
             }],
         },
     }
+elif opts.action == "add-cascade":
+    if len(opts.args) != 3:
+        raise SystemExit("add-cascade requires DEPLOYMENT_ID INGRESS_NODE EGRESS_NODE")
+    state = attach_cascade(state, opts.args[0], opts.args[1], opts.args[2])
 elif opts.action in ("add-key", "add-keys", "remove-key", "remove-all-keys"):
     if len(opts.args) < 1:
         raise SystemExit(f"{opts.action} requires NODE")

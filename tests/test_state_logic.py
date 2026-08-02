@@ -175,6 +175,41 @@ class StateCliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unsupported country code", result.stderr)
 
+    def test_add_cascade_links_existing_nodes_without_changing_credentials(self):
+        state = self.fixture_state()
+        state["nodes"]["node-b"] = {
+            "host": "192.0.2.20",
+            "management_private_key": "egress-private-key",
+            "xray": {"access_keys": []},
+        }
+        result = self.run_cli(
+            state, "add-cascade", "cascade-1", "node-a", "node-b"
+        )
+        self.assertEqual(result["nodes"]["node-a"]["management_private_key"], "private-key")
+        self.assertEqual(
+            result["deployments"]["cascade-1"]["roles"]["ingress"]["node"],
+            "node-a",
+        )
+
+    def test_add_cascade_rejects_missing_node(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(STATE_CLI),
+                "add-cascade",
+                "cascade-1",
+                "node-a",
+                "missing",
+            ],
+            cwd=ROOT_DIR,
+            input=json.dumps(self.fixture_state()),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("egress node not found", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
