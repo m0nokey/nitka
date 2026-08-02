@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Render the compact management screen for one Cascade deployment."""
+
+import argparse
+import concurrent.futures
+import json
+from datetime import datetime
+
+try:
+    from scripts.render_nodes import node_diagnostics
+except ModuleNotFoundError:
+    from render_nodes import node_diagnostics
+
+
+def date_value(value):
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+    except (AttributeError, ValueError):
+        return "N/A"
+
+
+def node_status(node, diagnostics=None):
+    if diagnostics and id(node) in diagnostics:
+        return diagnostics[id(node)].get("status", "Unknown")
+    return node.get("status", "Active")
+
+
+def deployment_data(state, deployment_id):
+    deployment = state.get("deployments", {}).get(deployment_id)
+    if not isinstance(deployment, dict):
+        raise ValueError(f"deployment not found: {deployment_id}")
+    nodes = state.get("nodes", {})
+    roles = deployment.get("roles", {})
+    result = []
+    for role in ("ingress", "egress"):
+        node_name = roles.get(role, {}).get("node")
+        node = nodes.get(node_name)
+        if not isinstance(node, dict):
+            raise ValueError(f"deployment node not found: {deployment_id}/{role}")
+        result.append((role, node))
+    return result
+
+
+def render(state, deployment_id, diagnostics=None):
+    rows = deployment_data(state, deployment_id)
+    statuses = [node_status(node, diagnostics) for _, node in rows]
+    deployment_status = "Active" if all(status == "Active" for status in statuses) else "Partial"
+    connectivity = "healthy" if deployment_status == "Active" else "degraded"
+
+    print("Cascaded VPN")
+    print()
+    print(
+        f"Status: {deployment_status:<8} Route: ingress → egress    "
+        f"Connectivity: {connectivity}"
+    )
+    print()
+    print("   ROLE      IP              STATUS   COUNTRY   CREATED      MODE              PROVIDER")
+    print()
+    for index, (role, node) in enumerate(rows, 1):
+        mode = node.get("mode") or ("Xray" if role == "ingress" else "SSH TUN + DNS")
+        values = (
+            role,
+            node.get("host", "N/A"),
+            node_status(node, diagnostics),
+            node.get("country", "N/A"),
+            date_value(node.get("created_at")),
+            mode,
+            node.get("provider", "N/A"),
+        )
+        print(
+            f"  {index}. {values[0]:<9} {values[1]:<15} {values[2]:<8} "
+            f"{values[3]:<9} {values[4]:<12} {values[5]:<17} {values[6]}"
+        )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("deployment")
+    parser.add_argument("--check", action="store_true")
+    state = json.load(__import__("sys").stdin)
+    args = parser.parse_args()
+    try:
+        diagnostics = None
+        if args.check:
+            rows = deployment_data(state, args.deployment)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                futures = {pool.submit(node_diagnostics, node): node for _, node in rows}
+                diagnostics = {id(node): future.result() for future, node in futures.items()}
+        render(state, args.deployment, diagnostics)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+
+if __name__ == "__main__":
+    main()

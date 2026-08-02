@@ -514,25 +514,51 @@ bootstrap_preflight_failure_menu() {
     done
 }
 
+add_vpn_server_menu() {
+    local choice
+    while true; do
+        clear_screen
+        echo
+        menu_heading "Add VPN server"
+        echo
+        menu_option 1 "Single-node Xray"
+        menu_option 2 "Cascade VPN"
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' '1, 2, or b, m, i, x'; then continue; fi
+        case "$choice" in
+            1) add_node || true; return ;;
+            2) cascade_deployments || true; return ;;
+            b) return ;;
+            m) MAIN_MENU_REQUESTED=1; return ;;
+            i) show_info add-node ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+}
+
 
 while true; do
     clear_screen
     echo
     menu_option 1 "VPN servers"
     menu_option 2 "Add VPN server"
-    menu_option 3 "Cascade VPN"
-    menu_option 4 Vault
+    menu_option 3 Vault
     echo
     menu_control i info
     menu_control x exit
     echo
-    if ! read_required_choice choice '?: ' '1, 2, 3, 4, i, or x'; then continue; fi
+    if ! read_required_choice choice '?: ' '1, 2, 3, i, or x'; then continue; fi
     MAIN_MENU_REQUESTED=0
     case "$choice" in
         1) vpn_servers || true ;;
-        2) add_node || true ;;
-        3) cascade_deployments || true ;;
-        4) secure_state || true ;;
+        2) add_vpn_server_menu || true ;;
+        3) secure_state || true ;;
         i) show_info general ;;
         x) exit_tui ;;
         *) invalid_choice ;;

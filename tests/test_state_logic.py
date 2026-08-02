@@ -210,6 +210,20 @@ class StateCliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("egress node not found", result.stderr)
 
+    def test_remove_cascade_removes_deployment_and_unshared_nodes(self):
+        state = self.fixture_state()
+        state["nodes"]["node-b"] = {
+            "host": "192.0.2.20",
+            "management_private_key": "egress-private-key",
+            "xray": {"access_keys": []},
+        }
+        state = self.run_cli(state, "add-cascade", "cascade-1", "node-a", "node-b")
+        result = self.run_cli(state, "remove-cascade", "cascade-1")
+
+        self.assertEqual(result.get("deployments"), {})
+        self.assertNotIn("node-a", result["nodes"])
+        self.assertNotIn("node-b", result["nodes"])
+
     def test_extract_cascade_builds_ansible_variables(self):
         state = self.fixture_state()
         state["nodes"]["node-a"]["xray"].update({

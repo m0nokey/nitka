@@ -32,6 +32,223 @@ show_node_status() {
     rm -f "$state"
 }
 
+show_cascade() {
+    local deployment_id="$1" state
+    state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-screen.XXXXXX")"
+    if read_vault_state "$state"; then
+        python3 "$ROOT_DIR/scripts/render_cascade.py" --check "$deployment_id" <"$state"
+    fi
+    rm -f "$state"
+}
+
+cascade_node() {
+    local deployment_id="$1" role="$2" state
+    state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-node.XXXXXX")"
+    if read_vault_state "$state"; then
+        python3 - "$deployment_id" "$role" "$state" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[3], encoding="utf-8"))
+deployment = state["deployments"][sys.argv[1]]
+print(deployment["roles"][sys.argv[2]]["node"])
+PY
+    fi
+    rm -f "$state"
+}
+
+select_cascade_node() {
+    local deployment_id="$1" choice
+    while true; do
+        clear_screen
+        menu_heading "Select node:"
+        echo
+        menu_option 1 ingress
+        menu_option 2 egress
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' '1, 2, or b, m, i, x'; then continue; fi
+        case "$choice" in
+            1) CASCADE_SELECTED_NODE="$(cascade_node "$deployment_id" ingress)"; return 0 ;;
+            2) CASCADE_SELECTED_NODE="$(cascade_node "$deployment_id" egress)"; return 0 ;;
+            b) return 1 ;;
+            m) MAIN_MENU_REQUESTED=1; return 1 ;;
+            i) show_info status ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+}
+
+manage_cascade_routing() {
+    local choice
+    while true; do
+        clear_screen
+        menu_heading "Manage routing rules:"
+        echo
+        printf '%s\n' "Routing rules management will be added in the next Cascade stage."
+        printf '%s\n' "The current whitelist routing policy remains unchanged."
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' 'b, m, i, or x'; then continue; fi
+        case "$choice" in
+            b) return 0 ;;
+            m) MAIN_MENU_REQUESTED=1; return 0 ;;
+            i) show_info status ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+}
+
+restart_cascade() {
+    local deployment_id="$1" ingress_node egress_node
+    ingress_node="$(cascade_node "$deployment_id" ingress)"
+    egress_node="$(cascade_node "$deployment_id" egress)"
+    if run_node_playbook "$egress_node" restart.yml "" "Restarting Cascade egress" cascade_restart \
+        && run_node_playbook "$ingress_node" restart.yml "" "Restarting Cascade ingress" cascade_restart; then
+        pipeline_complete "Cascade servers restarted successfully." 1
+        return 0
+    fi
+    return 1
+}
+
+remove_cascade() {
+    local deployment_id="$1" confirm ingress_node egress_node
+    while true; do
+        clear_screen
+        menu_heading "Delete VPN server:"
+        echo
+        printf '%s\n' "This deletes the Cascade and both VPS nodes. (y/n)"
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice confirm '?: ' 'y or n, or b, m, i, x'; then continue; fi
+        case "$confirm" in
+            [Yy]) break ;;
+            [Nn]|b) return 0 ;;
+            m) MAIN_MENU_REQUESTED=1; return 0 ;;
+            i) show_info removal ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+    ingress_node="$(cascade_node "$deployment_id" ingress)"
+    egress_node="$(cascade_node "$deployment_id" egress)"
+    clear_screen
+    menu_heading "Deleting VPN server:"
+    echo
+    printf '%s\n' "Deleting the Cascade egress and ingress VPS nodes."
+    echo
+    if ! remove_remote_node "$egress_node" || ! remove_remote_node "$ingress_node"; then
+        show_result_screen "Cascade deletion did not complete. The Vault was not changed."
+        return 0
+    fi
+    if state_mutate remove-cascade "$deployment_id"; then
+        pipeline_complete "Cascade and both VPS nodes were deleted." 1
+        return "$NODE_REMOVED_STATUS"
+    fi
+    show_result_screen "The VPS nodes were cleaned, but the encrypted Vault could not be updated."
+    return 0
+}
+
+manage_cascade_server() {
+    local deployment_id="$1" removal_status
+    while true; do
+        clear_screen
+        echo
+        show_cascade "$deployment_id"
+        echo
+        menu_option 1 "Check VPN status"
+        menu_option 2 "Open SSH session"
+        menu_option 3 "Restart VPN server"
+        menu_option 4 "Block ads and threats"
+        menu_option 5 "Block countries"
+        menu_option 6 "Rotate SSH key"
+        menu_option 7 "Manage routing rules"
+        menu_option 8 "Delete VPN server"
+        echo
+        if ! prompt_nav; then continue; fi
+        case "$REPLY" in
+            1) clear_screen; show_cascade "$deployment_id"; pause_result_screen ;;
+            2)
+                if select_cascade_node "$deployment_id"; then
+                    open_node_ssh_session "$CASCADE_SELECTED_NODE" || true
+                fi
+                ;;
+            3)
+                clear_screen
+                if restart_cascade "$deployment_id"; then :; else pause_result_screen; fi
+                ;;
+            4)
+                manage_dns_protection "$(cascade_node "$deployment_id" egress)" || true
+                ;;
+            5)
+                manage_local_region_policy "$(cascade_node "$deployment_id" ingress)" || true
+                ;;
+            6)
+                if select_cascade_node "$deployment_id"; then
+                    clear_screen
+                    rotate_ssh_key "$CASCADE_SELECTED_NODE" || true
+                fi
+                ;;
+            7) manage_cascade_routing ;;
+            8)
+                remove_cascade "$deployment_id" || removal_status=$?
+                removal_status="${removal_status:-0}"
+                if ((removal_status == NODE_REMOVED_STATUS)); then
+                    return "$NODE_REMOVED_STATUS"
+                fi
+                return
+                ;;
+            i) show_info server ;;
+            b) return ;;
+            m) MAIN_MENU_REQUESTED=1; return ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+        [[ "$MAIN_MENU_REQUESTED" == 1 ]] && return
+    done
+}
+
+manage_cascade() {
+    local deployment_id="$1" ingress_node
+    while true; do
+        clear_screen
+        echo
+        show_cascade "$deployment_id"
+        echo
+        menu_option 1 "Manage VPN server"
+        menu_option 2 "Manage access keys"
+        echo
+        if ! prompt_nav; then continue; fi
+        case "$REPLY" in
+            1) manage_cascade_server "$deployment_id" ;;
+            2)
+                ingress_node="$(cascade_node "$deployment_id" ingress)"
+                manage_keys "$ingress_node"
+                ;;
+            i) show_info status ;;
+            b) return ;;
+            m) MAIN_MENU_REQUESTED=1; return ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+        [[ "$MAIN_MENU_REQUESTED" == 1 ]] && return
+    done
+}
+
 cascade_deployments() {
     local state count names ingress_choice egress_choice deployment_id
     local ingress_node egress_node action
@@ -397,7 +614,7 @@ remove_node() {
     return 0
 }
 vpn_servers() {
-    local count names node state node_status
+    local count items item_count selection kind name node state node_status
     while true; do
         clear_screen
         state="$(mktemp "$RUNTIME_TMP_DIR/.servers.XXXXXX")"
@@ -405,11 +622,12 @@ vpn_servers() {
             rm -f "$state"
             return 1
         fi
-        if ! count="$(python3 "$ROOT_DIR/scripts/state_cli.py" count <"$state")"; then
+        if ! items="$(python3 "$ROOT_DIR/scripts/render_fleet.py" --items <"$state")"; then
             rm -f "$state"
             return 1
         fi
-        if [[ "$count" == 0 ]]; then
+        item_count="$(printf '%s\n' "$items" | sed '/^$/d' | wc -l | tr -d ' ')"
+        if [[ "$item_count" == 0 ]]; then
             echo
             menu_heading "VPN servers:"
             echo
@@ -419,7 +637,7 @@ vpn_servers() {
             echo
             if ! prompt_nav; then continue; fi
             case "$REPLY" in
-                1) rm -f "$state"; add_node || true; return ;;
+                1) rm -f "$state"; add_vpn_server_menu || true; return ;;
                 i) show_info add-node; rm -f "$state"; continue ;;
                 b) rm -f "$state"; return ;;
                 m) rm -f "$state"; MAIN_MENU_REQUESTED=1; return ;;
@@ -427,26 +645,27 @@ vpn_servers() {
                 *) invalid_choice; rm -f "$state"; continue ;;
             esac
         fi
-        if [[ "$count" == 1 ]]; then
-            if ! node="$(python3 "$ROOT_DIR/scripts/state_cli.py" names <"$state")"; then
-                rm -f "$state"
-                return 1
-            fi
+        if [[ "$item_count" == 1 ]]; then
+            IFS=$'\t' read -r kind name <<<"$items"
             rm -f "$state"
-            node_status=0
-            if manage_node "$node"; then
-                :
+            if [[ "$kind" == cascade ]]; then
+                manage_cascade "$name" || true
             else
-                node_status=$?
-            fi
-            if ((node_status == NODE_REMOVED_STATUS)); then
-                continue
+                node_status=0
+                if manage_node "$name"; then
+                    :
+                else
+                    node_status=$?
+                fi
+                if ((node_status == NODE_REMOVED_STATUS)); then
+                    continue
+                fi
             fi
             return
         fi
-        python3 "$ROOT_DIR/scripts/render_nodes.py" --check <"$state"
+        python3 "$ROOT_DIR/scripts/render_fleet.py" --check <"$state"
         echo
-        if ! prompt_nav "1-$count"; then continue; fi
+        if ! prompt_nav "1-$item_count"; then continue; fi
         case "$REPLY" in
             i) show_info status; rm -f "$state"; continue ;;
             b) rm -f "$state"; return ;;
@@ -454,15 +673,15 @@ vpn_servers() {
             x) rm -f "$state"; exit_tui ;;
             *[!0-9]*) invalid_choice; rm -f "$state"; continue ;;
             *)
-                if ! names="$(python3 "$ROOT_DIR/scripts/state_cli.py" names <"$state")"; then
-                    rm -f "$state"
-                    return 1
-                fi
-                node="$(printf '%s\n' "$names" | sed -n "${REPLY}p")"
+                selection="$(printf '%s\n' "$items" | sed -n "${REPLY}p")"
                 rm -f "$state"
-                if [[ -n "$node" ]]; then
+                IFS=$'\t' read -r kind name <<<"$selection"
+                if [[ -n "$name" && "$kind" == cascade ]]; then
+                    manage_cascade "$name" || true
+                    return
+                elif [[ -n "$name" ]]; then
                     node_status=0
-                    if manage_node "$node"; then
+                    if manage_node "$name"; then
                         :
                     else
                         node_status=$?

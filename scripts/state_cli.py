@@ -94,7 +94,7 @@ parser.add_argument(
         "count", "names", "extract", "extract-cascade", "mark-deployed",
         "set-management-key", "set-ssh-host-key", "set-bootstrap",
         "set-dns-profile", "set-local-region", "remove-node", "add-node",
-        "add-cascade", "add-key", "add-keys", "remove-key", "remove-all-keys",
+        "add-cascade", "remove-cascade", "add-key", "add-keys", "remove-key", "remove-all-keys",
     ),
 )
 parser.add_argument("args", nargs="*")
@@ -316,6 +316,29 @@ elif opts.action == "add-cascade":
     if len(opts.args) != 3:
         raise SystemExit("add-cascade requires DEPLOYMENT_ID INGRESS_NODE EGRESS_NODE")
     state = attach_cascade(state, opts.args[0], opts.args[1], opts.args[2])
+elif opts.action == "remove-cascade":
+    if len(opts.args) != 1:
+        raise SystemExit("remove-cascade requires DEPLOYMENT_ID")
+    deployment_id = opts.args[0]
+    deployments = state.get("deployments", {})
+    deployment = deployments.get(deployment_id)
+    if not isinstance(deployment, dict):
+        raise SystemExit(f"deployment not found: {deployment_id}")
+    roles = deployment.get("roles", {})
+    node_names = {
+        roles.get(role, {}).get("node")
+        for role in ("ingress", "egress")
+        if isinstance(roles.get(role), dict)
+    }
+    del deployments[deployment_id]
+    referenced = {
+        role.get("node")
+        for other in deployments.values()
+        for role in other.get("roles", {}).values()
+        if isinstance(role, dict)
+    }
+    for node_name in node_names - referenced:
+        nodes.pop(node_name, None)
 elif opts.action in ("add-key", "add-keys", "remove-key", "remove-all-keys"):
     if len(opts.args) < 1:
         raise SystemExit(f"{opts.action} requires NODE")
