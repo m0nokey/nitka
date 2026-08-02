@@ -1,0 +1,76 @@
+name: nitka-egress
+
+services:
+  ssh_tun_server:
+    container_name: nitka-ssh-tun-server
+    build:
+      context: ./ssh_tun_server
+    image: local/ssh-tun-server:latest
+    env_file:
+      - ./ssh_tun_server/security.env
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./ssh_tun_server/authorized_keys:/run/nitka/authorized_keys:ro
+      - ./ssh_tun_server/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key:ro
+      - ./ssh_tun_server/ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "{{ ssh_tun_ssh_port }}:22"
+    networks:
+      nitka_egress:
+        ipv4_address: {{ ssh_tun_network_container_vpn_ipv4 }}
+    dns_search: []
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    pids_limit: 150
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.50
+    logging:
+      driver: none
+
+  unbound:
+    container_name: nitka-unbound
+    build:
+      context: ./dns
+    image: local/unbound:latest
+    depends_on:
+      ssh_tun_server:
+        condition: service_healthy
+    network_mode: "service:ssh_tun_server"
+    volumes:
+      - ./dns/unbound.conf:/etc/unbound/unbound.conf:ro
+      - ./dns/unbound.conf.d:/etc/unbound/unbound.conf.d:ro
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    dns_search: []
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    logging:
+      driver: none
+
+networks:
+  nitka_egress:
+    name: nitka_egress
+    driver: bridge
+    ipam:
+      config:
+        - subnet: {{ ssh_tun_network_container_subnet_cidr_ipv4 }}
+          gateway: {{ ssh_tun_network_container_gateway_ipv4 }}

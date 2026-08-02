@@ -1,0 +1,19 @@
+---
+- name: Validate SSH TUN endpoint
+  ansible.builtin.assert:
+    that:
+      - ssh_tun_endpoint is defined
+      - ssh_tun_endpoint in ['client', 'server']
+    fail_msg: "Set ssh_tun_endpoint to either 'client' or 'server'."
+  changed_when: false
+
+- name: Ensure SSH TUN keypair exists on control host
+  ansible.builtin.include_tasks: keypair.yml
+
+- name: Configure SSH TUN client endpoint
+  ansible.builtin.include_tasks: client.yml
+  when: ssh_tun_endpoint == 'client'
+
+- name: Configure SSH TUN server endpoint
+  ansible.builtin.include_tasks: server.yml
+  when: ssh_tun_endpoint == 'server'

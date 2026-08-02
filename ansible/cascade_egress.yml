@@ -1,0 +1,14 @@
+---
+- name: Deploy Nitka cascade egress stack
+  hosts: cascade_egress
+  become: true
+  gather_facts: true
+  roles:
+    - role: system_base
+      vars:
+        system_base_docker_updater_name: "{{ cascade_egress_updater_name | default('nitka-cascade-egress') }}"
+        system_base_docker_updater_compose_file: "{{ egress_remote_dir }}/compose.yml"
+    - role: cascade_ssh_tun
+      vars:
+        ssh_tun_endpoint: server
+    - role: cascade_egress

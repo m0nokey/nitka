@@ -1,0 +1,6 @@
+forward-zone:
+    name: "."
+    forward-tls-upstream: yes
+{% for upstream in egress_unbound_forward_servers %}
+    forward-addr: {{ upstream.address }}@853#{{ upstream.tls_name }}
+{% endfor %}

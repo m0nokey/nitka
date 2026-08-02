@@ -1,0 +1,1 @@
+[{{ ssh_tun_public_host }}]:{{ ssh_tun_ssh_port }} {{ lookup('file', ssh_tun_ssh_key_dir ~ '/ssh_host_ed25519_key.pub') | trim }}
