@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Cascade ingress Docker namespace watchdog fallback timer
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec={{ cascade_ingress_watchdog_timer_interval | default('5min') }}
+AccuracySec=30s
+Unit=cascade-ingress-watchdog.service
+
+[Install]
+WantedBy=timers.target

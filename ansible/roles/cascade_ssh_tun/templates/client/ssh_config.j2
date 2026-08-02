@@ -1,14 +1,14 @@
 Host proxy
-    HostName {{ ssh_tun_public_host }}
-    Port {{ ssh_tun_ssh_port }}
-    User {{ ssh_tun_ssh_username }}
+    HostName {{ cascade_ssh_tun_public_host }}
+    Port {{ cascade_ssh_tun_ssh_port }}
+    User {{ cascade_ssh_tun_ssh_username }}
     IdentityFile /ssh/id_ed25519
     IdentitiesOnly yes
-    LogLevel {{ ssh_tun_client_log_level }}
+    LogLevel {{ cascade_ssh_tun_client_log_level }}
     ServerAliveInterval 5
     ServerAliveCountMax 2
     TCPKeepAlive yes
-    IPQoS {{ ssh_tun_client_ipqos }}
+    IPQoS {{ cascade_ssh_tun_client_ipqos }}
     HostKeyAlgorithms ssh-ed25519
     Ciphers aes256-gcm@openssh.com
     MACs hmac-sha2-512-etm@openssh.com
@@ -18,4 +18,4 @@ Host proxy
     UpdateHostKeys no
     UserKnownHostsFile /ssh/known_hosts
     Tunnel yes
-    TunnelDevice {{ ssh_tun_device_number }}:{{ ssh_tun_device_number }}
+    TunnelDevice {{ cascade_ssh_tun_device_number }}:{{ cascade_ssh_tun_device_number }}

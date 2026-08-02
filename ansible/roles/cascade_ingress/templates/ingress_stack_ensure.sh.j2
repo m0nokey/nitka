@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-nitka_debug="{{ nitka_debug | default(false) | bool | ternary('1', '0') }}"
+cascade_ingress_debug="{{ cascade_ingress_debug | default(false) | bool | ternary('1', '0') }}"
 
 wait_healthy() {
     container="$1"
@@ -83,8 +83,8 @@ resolve_release_image() {
 
 remove_ingress_dependents() {
     docker compose rm -f -s clashrs xray >/dev/null 2>&1 || true
-    docker rm -f nitka-clashrs nitka-xray >/dev/null 2>&1 || true
-    for container in nitka-clashrs nitka-xray; do
+    docker rm -f cascade-clashrs cascade-xray >/dev/null 2>&1 || true
+    for container in cascade-clashrs cascade-xray; do
         end=$((SECONDS + 20))
         while docker inspect "$container" >/dev/null 2>&1 && [ "$SECONDS" -lt "$end" ]; do
             docker rm -f "$container" >/dev/null 2>&1 || true
@@ -98,9 +98,9 @@ remove_ingress_dependents() {
 }
 
 reset_ingress_stack_for_recovery() {
-    docker update --restart=no nitka-clashrs nitka-xray >/dev/null 2>&1 || true
-    docker rm -f nitka-xray nitka-clashrs >/dev/null 2>&1 || true
-    for container in nitka-xray nitka-clashrs; do
+    docker update --restart=no cascade-clashrs cascade-xray >/dev/null 2>&1 || true
+    docker rm -f cascade-xray cascade-clashrs >/dev/null 2>&1 || true
+    for container in cascade-xray cascade-clashrs; do
         end=$((SECONDS + 30))
         while docker inspect "$container" >/dev/null 2>&1 && [ "$SECONDS" -lt "$end" ]; do
             docker rm -f "$container" >/dev/null 2>&1 || true
@@ -113,7 +113,7 @@ reset_ingress_stack_for_recovery() {
     done
 }
 
-if [ "$nitka_debug" = "1" ]; then
+if [ "$cascade_ingress_debug" = "1" ]; then
     echo "===== docker compose config ====="
     docker compose config
     echo "===== docker compose up ====="
@@ -124,7 +124,7 @@ resolve_release_image clashrs Watfaq/clash-rs 'ghcr.io/watfaq/clash-rs:latest' l
 resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:latest' local/xray-core:auto || exit 1
 
 validate_reality_target() {
-    target={{ ingress_xray_obfs_host | quote }}
+    target={{ cascade_ingress_xray_obfs_host | quote }}
     echo "validating REALITY target ${target}"
     docker run --rm --network host local/xray-core:auto tls ping "$target" || {
         echo "REALITY target validation failed: ${target}" >&2
@@ -138,13 +138,13 @@ validate_reality_target || exit 1
 # only services that depend on its network namespace, so deploys do not tear down
 # the whole ingress stack and do not wipe anonymous volumes.
 docker compose up -d --no-build --remove-orphans --no-deps ssh_tun_client || exit 1
-wait_healthy nitka-ssh-tun-client {{ ingress_ssh_startup_timeout_seconds | default(180) }} || exit 1
+wait_healthy cascade-ssh-tun-client {{ cascade_ingress_ssh_startup_timeout_seconds | default(180) }} || exit 1
 remove_ingress_dependents || exit 1
 
 start_clash() {
     docker compose up -d --force-recreate --no-deps clashrs || return 1
-    wait_shared_port nitka-ssh-tun-client {{ ingress_clash_port }} 45 || return 1
-    wait_healthy nitka-clashrs {{ ingress_clash_startup_timeout_seconds | default(180) }} || return 1
+    wait_shared_port cascade-ssh-tun-client {{ cascade_ingress_clash_port }} 45 || return 1
+    wait_healthy cascade-clashrs {{ cascade_ingress_clash_startup_timeout_seconds | default(180) }} || return 1
 }
 
 if ! start_clash; then
@@ -157,19 +157,19 @@ fi
 docker compose up -d --force-recreate --no-deps xray || exit 1
 rc=0
 
-if [ "$nitka_debug" = "1" ]; then
+if [ "$cascade_ingress_debug" = "1" ]; then
     echo "===== docker compose ps ====="
     docker compose ps -a || true
     echo "===== docker ps ====="
     docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' || true
     echo "===== container state ====="
-    for container in nitka-ssh-tun-client nitka-clashrs nitka-xray; do
+    for container in cascade-ssh-tun-client cascade-clashrs cascade-xray; do
         docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
     done
     echo "===== docker compose logs ====="
     docker compose logs --tail=200 || true
     echo "===== direct container logs ====="
-    for container in nitka-ssh-tun-client nitka-clashrs nitka-xray; do
+    for container in cascade-ssh-tun-client cascade-clashrs cascade-xray; do
         echo "----- $container -----"
         docker logs --tail=120 "$container" 2>&1 || true
     done

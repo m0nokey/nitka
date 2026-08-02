@@ -1,8 +1,8 @@
-name: nitka-ingress
+name: cascade-ingress
 
 services:
   ssh_tun_client:
-    container_name: nitka-ssh-tun-client
+    container_name: cascade-ssh-tun-client
     build:
       context: ./ssh_tun_client
     image: local/ssh-tun-client:latest
@@ -21,17 +21,17 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck"]
-      interval: {{ ingress_ssh_healthcheck_interval | default('5s') }}
-      timeout: {{ ingress_ssh_healthcheck_timeout | default('2s') }}
-      retries: {{ ingress_ssh_healthcheck_retries | default(2) }}
-      start_period: {{ ingress_ssh_healthcheck_start_period | default('5s') }}
+      interval: {{ cascade_ingress_ssh_healthcheck_interval | default('5s') }}
+      timeout: {{ cascade_ingress_ssh_healthcheck_timeout | default('2s') }}
+      retries: {{ cascade_ingress_ssh_healthcheck_retries | default(2) }}
+      start_period: {{ cascade_ingress_ssh_healthcheck_start_period | default('5s') }}
     volumes:
       - ./ssh_tun_client:/ssh:ro
     dns:
-      - {{ ssh_tun_network_vpn_gateway_ipv4 }}
+      - {{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}
     dns_search: []
     networks:
-      - nitka_ingress
+      - cascade_ingress
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
     pids_limit: 100
@@ -42,7 +42,7 @@ services:
       driver: none
 
   clashrs:
-    container_name: nitka-clashrs
+    container_name: cascade-clashrs
     image: local/clash-rs:latest
     network_mode: "service:ssh_tun_client"
     cap_drop:
@@ -58,11 +58,11 @@ services:
       - ./clashrs/config.yaml:/etc/clash/config.yaml:ro
     command: ["-d", "/etc/clash", "--compatibility"]
     healthcheck:
-      test: ["CMD", "nc", "-z", "-w", "2", "127.0.0.1", "{{ ingress_clash_port }}"]
-      interval: {{ ingress_clash_healthcheck_interval | default('5s') }}
-      timeout: {{ ingress_clash_healthcheck_timeout | default('2s') }}
-      retries: {{ ingress_clash_healthcheck_retries | default(2) }}
-      start_period: {{ ingress_clash_healthcheck_start_period | default('5s') }}
+      test: ["CMD", "nc", "-z", "-w", "2", "127.0.0.1", "{{ cascade_ingress_clash_port }}"]
+      interval: {{ cascade_ingress_clash_healthcheck_interval | default('5s') }}
+      timeout: {{ cascade_ingress_clash_healthcheck_timeout | default('2s') }}
+      retries: {{ cascade_ingress_clash_healthcheck_retries | default(2) }}
+      start_period: {{ cascade_ingress_clash_healthcheck_start_period | default('5s') }}
     dns_search: []
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
@@ -74,7 +74,7 @@ services:
       driver: none
 
   xray:
-    container_name: nitka-xray
+    container_name: cascade-xray
     image: local/xray-core:auto
     cap_drop:
       - ALL
@@ -89,10 +89,10 @@ services:
       - ./xray/config.json:/etc/xray/config.json:ro
     command: ["run", "-c", "/etc/xray/config.json"]
     ports:
-      - "{{ ingress_xray_xhttp_port }}:{{ ingress_xray_xhttp_port }}"
-      - "{{ ingress_xray_reality_port }}:{{ ingress_xray_reality_port }}"
+      - "{{ cascade_ingress_xray_xhttp_port }}:{{ cascade_ingress_xray_xhttp_port }}"
+      - "{{ cascade_ingress_xray_reality_port }}:{{ cascade_ingress_xray_reality_port }}"
     networks:
-      - nitka_ingress
+      - cascade_ingress
     dns_search: []
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
@@ -104,6 +104,6 @@ services:
       driver: none
 
 networks:
-  nitka_ingress:
-    name: nitka_ingress
+  cascade_ingress:
+    name: cascade_ingress
     driver: bridge

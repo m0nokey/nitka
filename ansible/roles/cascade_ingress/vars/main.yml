@@ -1,2 +1,2 @@
 ---
-ingress_clash_tcp_concurrent: true
+cascade_ingress_clash_tcp_concurrent: true

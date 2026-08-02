@@ -1,7 +1,7 @@
 server:
-    interface: {{ ssh_tun_network_vpn_gateway_ipv4 }}
-    access-control: {{ ssh_tun_network_vpn_gateway_cidr_ipv4 }} allow
-    access-control: {{ ssh_tun_network_container_subnet_cidr_ipv4 }} allow
+    interface: {{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}
+    access-control: {{ cascade_ssh_tun_network_vpn_gateway_cidr_ipv4 }} allow
+    access-control: {{ cascade_ssh_tun_network_container_subnet_cidr_ipv4 }} allow
     access-control: 0.0.0.0/0 refuse
     directory: "/etc/unbound"
     do-daemonize: no

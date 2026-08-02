@@ -1,3 +1,3 @@
 ---
-- name: restart ingress stack
+- name: Restart ingress stack
   ansible.builtin.include_tasks: "{{ role_path }}/handlers/restart_ingress_stack.yml"

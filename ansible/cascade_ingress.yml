@@ -1,14 +1,14 @@
 ---
-- name: Deploy Nitka cascade ingress stack
+- name: Deploy Cascade ingress stack
   hosts: cascade_ingress
   become: true
   gather_facts: true
   roles:
     - role: system_base
       vars:
-        system_base_docker_updater_name: "{{ cascade_ingress_updater_name | default('nitka-cascade-ingress') }}"
-        system_base_docker_updater_compose_file: "{{ ingress_remote_dir }}/compose.yml"
+        system_base_docker_updater_name: "{{ cascade_ingress_updater_name | default('cascade-ingress') }}"
+        system_base_docker_updater_compose_file: "{{ cascade_ingress_remote_dir }}/compose.yml"
     - role: cascade_ssh_tun
       vars:
-        ssh_tun_endpoint: client
+        cascade_ssh_tun_endpoint: client
     - role: cascade_ingress

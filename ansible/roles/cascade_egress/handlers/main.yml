@@ -1,10 +1,9 @@
-
 ---
-- name: restart egress stack
+- name: Restart egress stack
   ansible.builtin.shell: |
     set -uo pipefail
-    nitka_debug="{{ nitka_debug | default(false) | bool | ternary('1', '0') }}"
-    if [ "$nitka_debug" = "1" ]; then
+    cascade_egress_debug="{{ cascade_egress_debug | default(false) | bool | ternary('1', '0') }}"
+    if [ "$cascade_egress_debug" = "1" ]; then
       echo "===== docker compose config ====="
       docker compose config
       echo "===== docker compose up ====="
@@ -32,24 +31,28 @@
     build_if_needed unbound local/unbound:latest ./dns || exit 1
     docker compose up -d --no-build --remove-orphans
     rc1=$?
-    if [ "$nitka_debug" = "1" ]; then
+    if [ "$cascade_egress_debug" = "1" ]; then
       echo "===== docker compose recreate unbound ====="
     fi
     docker compose up -d --force-recreate --no-deps unbound
     rc2=$?
-    if [ "$nitka_debug" = "1" ]; then
+    if [ "$cascade_egress_debug" = "1" ]; then
       echo "===== docker compose ps ====="
       docker compose ps -a || true
       echo "===== docker ps ====="
       docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' || true
       echo "===== container state ====="
-      for container in nitka-ssh-tun-server nitka-unbound; do
-        docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
+      inspect_format="$container state={% raw %}{{.State.Status}} running={{.State.Running}}"
+      inspect_format="$inspect_format restarting={{.State.Restarting}} exit={{.State.ExitCode}}"
+      inspect_format="$inspect_format error={{.State.Error}} health={{if .State.Health}}"
+      inspect_format="$inspect_format{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}"
+      for container in cascade-ssh-tun-server cascade-unbound; do
+        docker inspect -f "$inspect_format" "$container" 2>/dev/null || true
       done
       echo "===== docker compose logs ====="
       docker compose logs --tail=160 || true
       echo "===== direct container logs ====="
-      for container in nitka-ssh-tun-server nitka-unbound; do
+      for container in cascade-ssh-tun-server cascade-unbound; do
         echo "----- $container -----"
         docker logs --tail=120 "$container" 2>&1 || true
       done
@@ -58,6 +61,7 @@
       exit 1
     fi
   args:
-    chdir: "{{ egress_remote_dir }}"
+    chdir: "{{ cascade_egress_remote_dir }}"
     executable: /bin/bash
   become: true
+  changed_when: true

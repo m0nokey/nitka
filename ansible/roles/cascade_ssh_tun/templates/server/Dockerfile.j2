@@ -39,7 +39,7 @@ set -eu
 : "${network_vpn_subnet_cidr_ipv4:?}"
 : "${vpn_tun_mtu:=1200}"
 
-authorized_keys_src="/run/nitka/authorized_keys"
+authorized_keys_src="/run/cascade/authorized_keys"
 
 [ -s "$authorized_keys_src" ] || {
     echo "missing $authorized_keys_src" >&2

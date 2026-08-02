@@ -1,18 +1,18 @@
 #!/bin/sh
 set -eu
 
-compose_dir="{{ ingress_remote_dir }}"
+compose_dir="{{ cascade_ingress_remote_dir }}"
 ssh_service="ssh_tun_client"
 clash_service="clashrs"
 xray_service="xray"
-ssh_container="nitka-ssh-tun-client"
-clash_container="nitka-clashrs"
-xray_container="nitka-xray"
-clash_port="{{ ingress_clash_port }}"
-check_interval="{{ ingress_watchdog_interval_seconds | default(30) }}"
+ssh_container="cascade-ssh-tun-client"
+clash_container="cascade-clashrs"
+xray_container="cascade-xray"
+clash_port="{{ cascade_ingress_clash_port }}"
+check_interval="{{ cascade_ingress_watchdog_interval_seconds | default(30) }}"
 
 log() {
-    logger -t nitka-ingress-watchdog "$*"
+    logger -t cascade-ingress-watchdog "$*"
 }
 
 is_running() {

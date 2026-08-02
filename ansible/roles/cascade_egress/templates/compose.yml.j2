@@ -1,8 +1,8 @@
-name: nitka-egress
+name: cascade-egress
 
 services:
   ssh_tun_server:
-    container_name: nitka-ssh-tun-server
+    container_name: cascade-ssh-tun-server
     build:
       context: ./ssh_tun_server
     image: local/ssh-tun-server:latest
@@ -15,7 +15,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     volumes:
-      - ./ssh_tun_server/authorized_keys:/run/nitka/authorized_keys:ro
+      - ./ssh_tun_server/authorized_keys:/run/cascade/authorized_keys:ro
       - ./ssh_tun_server/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key:ro
       - ./ssh_tun_server/ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub:ro
     restart: unless-stopped
@@ -26,10 +26,10 @@ services:
       retries: 3
       start_period: 20s
     ports:
-      - "{{ ssh_tun_ssh_port }}:22"
+      - "{{ cascade_ssh_tun_ssh_port }}:22"
     networks:
-      nitka_egress:
-        ipv4_address: {{ ssh_tun_network_container_vpn_ipv4 }}
+      cascade_egress:
+        ipv4_address: {{ cascade_ssh_tun_network_container_vpn_ipv4 }}
     dns_search: []
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
@@ -41,7 +41,7 @@ services:
       driver: none
 
   unbound:
-    container_name: nitka-unbound
+    container_name: cascade-unbound
     build:
       context: ./dns
     image: local/unbound:latest
@@ -67,10 +67,10 @@ services:
       driver: none
 
 networks:
-  nitka_egress:
-    name: nitka_egress
+  cascade_egress:
+    name: cascade_egress
     driver: bridge
     ipam:
       config:
-        - subnet: {{ ssh_tun_network_container_subnet_cidr_ipv4 }}
-          gateway: {{ ssh_tun_network_container_gateway_ipv4 }}
+        - subnet: {{ cascade_ssh_tun_network_container_subnet_cidr_ipv4 }}
+          gateway: {{ cascade_ssh_tun_network_container_gateway_ipv4 }}

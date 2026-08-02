@@ -1,13 +1,13 @@
-{% set xray_block_domains = ingress_xray_block_domains | default([]) | unique | list %}
-{% set xray_block_ips = ingress_xray_block_ips | default([]) | unique | list %}
-{% set xray_reality_direct_domains = ingress_xray_reality_direct_domains | default([]) | unique | list %}
-{% set xray_reality_direct_ips = ingress_xray_reality_direct_ips | default([]) | unique | list %}
-{% set xray_xhttp_direct_domains = ingress_xray_xhttp_direct_domains | default([]) | unique | list %}
-{% set xray_xhttp_direct_ips = ingress_xray_xhttp_direct_ips | default([]) | unique | list %}
-{% set xray_proxy_domains = ingress_xray_reality_proxy_domains | default([]) | unique | list %}
-{% set xray_proxy_ips = ingress_xray_reality_proxy_ips | default([]) | unique | list %}
-{% set xray_dns_direct_domains = ingress_xray_dns_direct_domains | default([]) | unique | list %}
-{% set xray_dns_proxy_domains = ingress_xray_dns_proxy_domains | default(xray_proxy_domains) | reject('in', xray_dns_direct_domains) | unique | list %}
+{% set xray_block_domains = cascade_ingress_xray_block_domains | default([]) | unique | list %}
+{% set xray_block_ips = cascade_ingress_xray_block_ips | default([]) | unique | list %}
+{% set xray_reality_direct_domains = cascade_ingress_xray_reality_direct_domains | default([]) | unique | list %}
+{% set xray_reality_direct_ips = cascade_ingress_xray_reality_direct_ips | default([]) | unique | list %}
+{% set xray_xhttp_direct_domains = cascade_ingress_xray_xhttp_direct_domains | default([]) | unique | list %}
+{% set xray_xhttp_direct_ips = cascade_ingress_xray_xhttp_direct_ips | default([]) | unique | list %}
+{% set xray_proxy_domains = cascade_ingress_xray_reality_proxy_domains | default([]) | unique | list %}
+{% set xray_proxy_ips = cascade_ingress_xray_reality_proxy_ips | default([]) | unique | list %}
+{% set xray_dns_direct_domains = cascade_ingress_xray_dns_direct_domains | default([]) | unique | list %}
+{% set xray_dns_proxy_domains = cascade_ingress_xray_dns_proxy_domains | default(xray_proxy_domains) | reject('in', xray_dns_direct_domains) | unique | list %}
 {
   "log": {
     "access": "none",
@@ -18,12 +18,12 @@
     {
       "tag": "xhttp",
       "listen": "0.0.0.0",
-      "port": {{ ingress_xray_xhttp_port }},
+      "port": {{ cascade_ingress_xray_xhttp_port }},
       "protocol": "vless",
       "settings": {
         "clients": [
           {
-            "id": "{{ ingress_xray_xhttp_uuid }}",
+            "id": "{{ cascade_ingress_xray_xhttp_uuid }}",
             "email": "xhttp"
           }
         ],
@@ -34,15 +34,15 @@
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": {{ (ingress_xray_obfs_host ~ ':443') | to_json }},
-          "serverNames": [{{ ingress_xray_obfs_host | to_json }}],
-          "privateKey": "{{ lookup('file', ingress_state_dir ~ '/reality_private_key') | trim }}",
-          "shortIds": ["{{ ingress_xray_reality_short_id }}"],
+          "target": {{ (cascade_ingress_xray_obfs_host ~ ':443') | to_json }},
+          "serverNames": [{{ cascade_ingress_xray_obfs_host | to_json }}],
+          "privateKey": "{{ lookup('file', cascade_ingress_state_dir ~ '/reality_private_key') | trim }}",
+          "shortIds": ["{{ cascade_ingress_xray_reality_short_id }}"],
           "xver": 0,
           "fingerprint": "chrome"
         },
         "xhttpSettings": {
-          "path": {{ ingress_xray_obfs_path | to_json }},
+          "path": {{ cascade_ingress_xray_obfs_path | to_json }},
           "mode": "packet-up",
           "extra": {
             "scMaxEachPostBytes": 1000000,
@@ -59,12 +59,12 @@
     {
       "tag": "reality",
       "listen": "0.0.0.0",
-      "port": {{ ingress_xray_reality_port }},
+      "port": {{ cascade_ingress_xray_reality_port }},
       "protocol": "vless",
       "settings": {
         "clients": [
           {
-            "id": "{{ ingress_xray_reality_uuid }}",
+            "id": "{{ cascade_ingress_xray_reality_uuid }}",
             "email": "reality",
             "flow": "xtls-rprx-vision"
           }
@@ -76,10 +76,10 @@
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": {{ (ingress_xray_obfs_host ~ ':443') | to_json }},
-          "serverNames": [{{ ingress_xray_obfs_host | to_json }}],
-          "privateKey": "{{ lookup('file', ingress_state_dir ~ '/reality_private_key') | trim }}",
-          "shortIds": ["{{ ingress_xray_reality_short_id }}"],
+          "target": {{ (cascade_ingress_xray_obfs_host ~ ':443') | to_json }},
+          "serverNames": [{{ cascade_ingress_xray_obfs_host | to_json }}],
+          "privateKey": "{{ lookup('file', cascade_ingress_state_dir ~ '/reality_private_key') | trim }}",
+          "shortIds": ["{{ cascade_ingress_xray_reality_short_id }}"],
           "xver": 0,
           "fingerprint": "chrome"
         }
@@ -99,7 +99,7 @@
         "servers": [
           {
             "address": "ssh_tun_client",
-            "port": {{ ingress_clash_port }}
+            "port": {{ cascade_ingress_clash_port }}
           }
         ]
       }
@@ -119,14 +119,14 @@
     "servers": [
 {% if xray_dns_proxy_domains | length > 0 %}
       {
-        "address": "{{ ssh_tun_network_vpn_gateway_ipv4 }}",
+        "address": "{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}",
         "port": 53,
         "domains": {{ xray_dns_proxy_domains | to_json }},
         "skipFallback": true,
         "finalQuery": true
       },
 {% endif %}
-{% for server in ingress_xray_dns_direct_servers %}
+{% for server in cascade_ingress_xray_dns_direct_servers %}
       {
         "address": "{{ server.address }}"{% if server.port is defined %},
         "port": {{ server.port }}{% endif %},
@@ -142,7 +142,7 @@
       {
         "type": "field",
         "inboundTag": ["dns"],
-        "ip": ["{{ ssh_tun_network_vpn_gateway_ipv4 }}"],
+        "ip": ["{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}"],
         "outboundTag": "proxy"
       },
       {
