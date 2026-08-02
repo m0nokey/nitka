@@ -21,6 +21,8 @@ def date_value(value):
 
 def status_for_node(node, diagnostics=None):
     if diagnostics and id(node) in diagnostics:
+        if node.get("role") == "egress":
+            return "Active" if diagnostics[id(node)]["management"].get("ssh") == "connected" else "Unreachable"
         return diagnostics[id(node)].get("status", "Unknown")
     return node.get("status", "Active")
 

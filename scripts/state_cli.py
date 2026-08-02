@@ -94,11 +94,12 @@ parser.add_argument(
         "count", "names", "extract", "extract-cascade", "mark-deployed",
         "set-management-key", "set-ssh-host-key", "set-bootstrap",
         "set-dns-profile", "set-local-region", "remove-node", "add-node",
-        "add-cascade", "remove-cascade", "add-key", "add-keys", "remove-key", "remove-all-keys",
+        "add-cascade", "remove-cascade", "share-management-key", "add-key", "add-keys", "remove-key", "remove-all-keys",
     ),
 )
 parser.add_argument("args", nargs="*")
 parser.add_argument("--bootstrap-key")
+parser.add_argument("--node-role", choices=("single", "ingress", "egress"), default="single")
 parser.add_argument("--server-name", default="github.com")
 parser.add_argument(
     "--port-mode",
@@ -164,6 +165,7 @@ elif opts.action == "mark-deployed":
     node = nodes[opts.args[0]]
     node["bootstrap_private_key"] = ""
     node["management_port"] = node["ssh_port"]
+    node["status"] = "Active"
 elif opts.action == "extract-cascade":
     if len(opts.args) != 1:
         raise SystemExit("extract-cascade requires DEPLOYMENT_ID")
@@ -278,6 +280,24 @@ elif opts.action == "add-node":
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     vision_uuid = str(uuid.uuid4())
+    xray_state = {
+        "vision_port": vision_port, "xhttp_port": xhttp_port,
+        "port_mode": opts.port_mode,
+        "reality_private_key": reality_private,
+        "reality_public_key": reality_public,
+        "reality_short_id": secrets.token_hex(8),
+        "server_name": server_name,
+        "dns_filter_profile": opts.dns_profile,
+        "dns_filter_lists": [item for item in opts.dns_lists.split(",") if item],
+        "local_region_countries": [],
+        "access_keys": [{
+            "key_id": "key-" + vision_uuid.replace("-", "")[:8],
+            "vision_uuid": vision_uuid,
+            "xhttp_uuid": str(uuid.uuid4()),
+        }],
+    }
+    if opts.node_role == "egress":
+        xray_state = {}
     nodes[name] = {
         "name": name,
         "host": host,
@@ -293,24 +313,10 @@ elif opts.action == "add-node":
         "bootstrap_ssh_port": bootstrap_port,
         "ssh_port": ssh_port,
         "management_port": bootstrap_port,
+        "role": opts.node_role,
         "ssh_host_public_key": "",
         "ssh_host_fingerprint": "",
-        "xray": {
-            "vision_port": vision_port, "xhttp_port": xhttp_port,
-            "port_mode": opts.port_mode,
-            "reality_private_key": reality_private,
-            "reality_public_key": reality_public,
-            "reality_short_id": secrets.token_hex(8),
-            "server_name": server_name,
-            "dns_filter_profile": opts.dns_profile,
-            "dns_filter_lists": [item for item in opts.dns_lists.split(",") if item],
-            "local_region_countries": [],
-            "access_keys": [{
-                "key_id": "key-" + vision_uuid.replace("-", "")[:8],
-                "vision_uuid": vision_uuid,
-                "xhttp_uuid": str(uuid.uuid4()),
-            }],
-        },
+        "xray": xray_state,
     }
 elif opts.action == "add-cascade":
     if len(opts.args) != 3:
@@ -339,6 +345,13 @@ elif opts.action == "remove-cascade":
     }
     for node_name in node_names - referenced:
         nodes.pop(node_name, None)
+elif opts.action == "share-management-key":
+    if len(opts.args) != 2 or opts.args[0] not in nodes or opts.args[1] not in nodes:
+        raise SystemExit("share-management-key requires SOURCE_NODE DESTINATION_NODE")
+    source = nodes[opts.args[0]]
+    destination = nodes[opts.args[1]]
+    destination["management_private_key"] = source["management_private_key"]
+    destination["management_authorized_key"] = source["management_authorized_key"]
 elif opts.action in ("add-key", "add-keys", "remove-key", "remove-all-keys"):
     if len(opts.args) < 1:
         raise SystemExit(f"{opts.action} requires NODE")

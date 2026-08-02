@@ -220,8 +220,285 @@ PY
     pipeline_complete "VPN server added successfully." 1
 }
 
+cascade_role_intro() {
+    local role="$1" choice
+    while true; do
+        clear_screen
+        menu_heading "Add VPN server"
+        echo
+        if [[ "$role" == egress ]]; then
+            printf '%s\n' "This VPS will be used as the egress server."
+            printf '%s\n' "It provides the remote exit, DNS, and SSH TUN server."
+        else
+            printf '%s\n' "This VPS will be used as the ingress server."
+            printf '%s\n' "Clients connect here; whitelist traffic is sent to egress."
+        fi
+        printf '%s\n' "If you are not sure what this role means, press i for information."
+        echo
+        menu_option 1 Continue
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' '1, or b, m, i, x'; then continue; fi
+        case "$choice" in
+            1) return 0 ;;
+            b) return 1 ;;
+            m) MAIN_MENU_REQUESTED=1; return 1 ;;
+            i) show_info general ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+}
+
+collect_cascade_node_access() {
+    local role="$1" host user port password review_status probe_rc auth_action
+    while true; do
+        if ! cascade_role_intro "$role"; then return 1; fi
+        if ! add_node_ip_prompt; then return 1; fi
+        host="$ADD_NODE_HOST"
+        unset ADD_NODE_HOST
+        if ! add_node_user_prompt; then return 1; fi
+        user="$ADD_NODE_USER"
+        unset ADD_NODE_USER
+        if ! add_node_port_prompt; then return 1; fi
+        port="$ADD_NODE_PORT"
+        unset ADD_NODE_PORT
+        if ! add_node_password_prompt; then return 1; fi
+        password="$ADD_NODE_PASSWORD"
+        unset ADD_NODE_PASSWORD
+        if review_node_connection "$host" "$user" "$port"; then
+            review_status=0
+        else
+            review_status=$?
+        fi
+        case "$review_status" in
+            0) ;;
+            1) unset password; continue ;;
+            *) unset password; return 1 ;;
+        esac
+
+        pipeline_start "Checking VPS resources" preflight
+        if probe_vps_resources "$host" "$user" "$port" "$password"; then
+            pipeline_complete "VPS resources available"
+            CASCADE_NODE_HOST="$host"
+            CASCADE_NODE_USER="$user"
+            CASCADE_NODE_PORT="$port"
+            CASCADE_NODE_PASSWORD="$password"
+            return 0
+        fi
+        probe_rc=$?
+        pipeline_abort
+        if ((probe_rc == INVALID_BOOTSTRAP_CREDENTIALS)); then
+            if bootstrap_auth_failure_menu; then
+                unset password
+                continue
+            fi
+            auth_action=$?
+            unset password
+            ((auth_action == 1)) && continue
+        fi
+        unset password
+        return 1
+    done
+}
+
+cascade_next_deployment_id() {
+    local state="$1"
+    python3 - "$state" <<'PY'
+import json
+import sys
+
+deployments = json.load(open(sys.argv[1], encoding="utf-8")).get("deployments", {})
+index = 1
+while f"cascade-{index}" in deployments:
+    index += 1
+print(f"cascade-{index}")
+PY
+}
+
+cascade_new_node_name() {
+    local before="$1" after="$2"
+    python3 - "$before" "$after" <<'PY'
+import json
+import sys
+
+before = json.load(open(sys.argv[1], encoding="utf-8"))
+after = json.load(open(sys.argv[2], encoding="utf-8"))
+print(next(name for name in after["nodes"] if name not in before.get("nodes", {})))
+PY
+}
+
+add_cascade() {
+    local before egress_state ingress_state shared_state cascade_state deployment_id
+    local egress_node ingress_node egress_host ingress_host egress_user egress_port ingress_user ingress_port choice
+    local server_name port_mode vision_port xhttp_port dns_profile dns_lists
+    local -a port_args=()
+    before="$(mktemp "$RUNTIME_TMP_DIR/.cascade-before.XXXXXX")"
+    egress_state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-egress.XXXXXX")"
+    ingress_state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-ingress.XXXXXX")"
+    shared_state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-shared.XXXXXX")"
+    cascade_state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-state.XXXXXX")"
+    if ! local_internet_available; then
+        show_result_screen "The computer running Nitka cannot reach the Internet."
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 0
+    fi
+    if ! read_vault_state "$before"; then
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 1
+    fi
+
+    if ! collect_cascade_node_access egress; then
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 0
+    fi
+    egress_host="$CASCADE_NODE_HOST"
+    egress_user="$CASCADE_NODE_USER"
+    egress_port="$CASCADE_NODE_PORT"
+    if [[ -n "$(find_node_by_connection "$before" "$egress_host" "$CASCADE_NODE_PORT")" ]]; then
+        show_result_screen "The egress VPS already exists in the Vault. Select it from VPN servers instead."
+        unset CASCADE_NODE_HOST CASCADE_NODE_USER CASCADE_NODE_PORT CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 0
+    fi
+    if ! XRAY_BOOTSTRAP_USER="$CASCADE_NODE_USER" XRAY_BOOTSTRAP_PASSWORD="$CASCADE_NODE_PASSWORD" XRAY_BOOTSTRAP_PORT="$CASCADE_NODE_PORT" \
+        python3 "$ROOT_DIR/scripts/state_cli.py" --node-role egress --server-name github.com --port-mode random --dns-profile disabled \
+        add-node auto "$egress_host" <"$before" >"$egress_state"; then
+        unset CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 1
+    fi
+    egress_node="$(cascade_new_node_name "$before" "$egress_state")"
+    unset CASCADE_NODE_PASSWORD
+
+    if ! collect_cascade_node_access ingress; then
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 0
+    fi
+    ingress_host="$CASCADE_NODE_HOST"
+    ingress_user="$CASCADE_NODE_USER"
+    ingress_port="$CASCADE_NODE_PORT"
+    if [[ -n "$(find_node_by_connection "$egress_state" "$ingress_host" "$CASCADE_NODE_PORT")" ]]; then
+        show_result_screen "The ingress VPS already exists in the Vault. Select it from VPN servers instead."
+        unset CASCADE_NODE_HOST CASCADE_NODE_USER CASCADE_NODE_PORT CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 0
+    fi
+
+    if ! add_node_domain_prompt; then
+        unset CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 0
+    fi
+    server_name="$ADD_NODE_SERVER_NAME"
+    unset ADD_NODE_SERVER_NAME
+    if ! add_node_port_mode_prompt; then
+        unset CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 0
+    fi
+    port_mode="$ADD_NODE_PORT_MODE"
+    vision_port="${ADD_NODE_VISION_PORT:-}"
+    xhttp_port="${ADD_NODE_XHTTP_PORT:-}"
+    unset ADD_NODE_PORT_MODE ADD_NODE_VISION_PORT ADD_NODE_XHTTP_PORT
+    if [[ "$port_mode" == manual ]]; then
+        port_args=(--vision-port "$vision_port" --xhttp-port "$xhttp_port")
+    fi
+    unset DNS_FILTER_CURRENT_PROFILE DNS_FILTER_LISTS
+    if ! select_dns_profile initial; then
+        unset CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 0
+    fi
+    dns_profile="$DNS_FILTER_PROFILE"
+    dns_lists="${DNS_FILTER_LISTS:-}"
+    if ! XRAY_BOOTSTRAP_USER="$CASCADE_NODE_USER" XRAY_BOOTSTRAP_PASSWORD="$CASCADE_NODE_PASSWORD" XRAY_BOOTSTRAP_PORT="$CASCADE_NODE_PORT" \
+        python3 "$ROOT_DIR/scripts/state_cli.py" --node-role ingress --server-name "$server_name" --port-mode "$port_mode" \
+        "${port_args[@]}" --dns-profile "$dns_profile" --dns-lists "$dns_lists" add-node auto "$ingress_host" <"$egress_state" >"$ingress_state"; then
+        unset CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 1
+    fi
+    ingress_node="$(cascade_new_node_name "$egress_state" "$ingress_state")"
+    unset CASCADE_NODE_PASSWORD
+
+    deployment_id="$(cascade_next_deployment_id "$ingress_state")"
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" share-management-key "$ingress_node" "$egress_node" <"$ingress_state" >"$shared_state"; then
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 1
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" add-cascade "$deployment_id" "$ingress_node" "$egress_node" <"$shared_state" >"$cascade_state"; then
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        return 1
+    fi
+
+    while true; do
+        clear_screen
+        menu_heading "Review Cascade VPN"
+        echo
+        printf '%-10s %-15s %-12s %-8s %-20s\n' "ROLE" "IP" "SSH USER" "PORT" "ACCESS"
+        printf '%-10s %-15s %-12s %-8s %-20s\n' "egress" "$egress_host" "$egress_user" "$egress_port" "shared deploy key"
+        printf '%-10s %-15s %-12s %-8s %-20s\n' "ingress" "$ingress_host" "$ingress_user" "$ingress_port" "shared deploy key"
+        echo
+        printf '%-12s %-40s\n' "FIELD" "VALUE"
+        printf '%-12s %-40s\n' "Deployment" "$deployment_id"
+        printf '%-12s %-40s\n' "Management" "deploy + shared SSH key"
+        printf '%-12s %-40s\n' "Route" "client → ingress → egress → Internet"
+        echo
+        menu_option 1 Continue
+        menu_option 2 Cancel
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' '1 or 2, or b, m, i, x'; then continue; fi
+        case "$choice" in
+            1) break ;;
+            2|b) rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"; return 0 ;;
+            m) MAIN_MENU_REQUESTED=1; rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"; return 0 ;;
+            i) show_info general ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+
+    pipeline_start "Installing Cascade VPN" install
+    if ! deploy_node "$egress_node" "$cascade_state" "" 1 bootstrap-only; then
+        pipeline_abort
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        show_result_screen "Cascade egress bootstrap failed. The Vault was not changed."
+        return 1
+    fi
+    if ! deploy_node "$ingress_node" "$cascade_state" "" 1 bootstrap-only; then
+        pipeline_abort
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        show_result_screen "Cascade ingress bootstrap failed. The Vault was not changed."
+        return 1
+    fi
+    if ! run_cascade_playbooks "$deployment_id" "$cascade_state"; then
+        pipeline_abort
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        show_result_screen "Cascade services failed to deploy. The Vault was not changed."
+        return 1
+    fi
+    if ! vault_save "$cascade_state"; then
+        pipeline_abort
+        rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+        show_result_screen "Cascade was deployed, but the encrypted Vault could not be saved."
+        return 1
+    fi
+    rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
+    pipeline_complete "Cascade VPN added successfully." 1
+}
+
 deploy_node() {
-    local node="$1" state_file="${2:-}" connect_port="${3:-}" bootstrap_mode="${4:-0}" before extra inventory inventory_dir key_file known_hosts_file host_key_file user host port target_port management_port bootstrap bootstrap_password bootstrap_user host_public_key ssh_common_args rc marked hardened_state ssh_host_public_key ssh_host_fingerprint actual_fingerprint
+    local node="$1" state_file="${2:-}" connect_port="${3:-}" bootstrap_mode="${4:-0}" deployment_mode="${5:-xray}" before extra inventory inventory_dir key_file known_hosts_file host_key_file user host port target_port management_port bootstrap bootstrap_password bootstrap_user host_public_key ssh_common_args rc marked hardened_state ssh_host_public_key ssh_host_fingerprint actual_fingerprint
     before="$(mktemp)"
     extra="$(mktemp)"
     inventory_dir="$(mktemp -d /tmp/xray-inventory.XXXXXX)"
@@ -378,13 +655,16 @@ deploy_node() {
         'sudo -n sh -c "systemctl stop nitka-ssh-rollback.timer nitka-ssh-rollback.service 2>/dev/null || true; systemctl reset-failed nitka-ssh-rollback.timer nitka-ssh-rollback.service 2>/dev/null || true"' \
         || true
 
-    printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: deploy" "          ansible_port: $target_port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" >"$inventory"
-    if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/site.yml" --private-key "$key_file"; then
-        :
-    else
-        rc=$?
-            rm -f "$before" "$extra" "$key_file" "$host_key_file" "$known_hosts_file"; rm -rf "$inventory_dir"
-        return "$rc"
+    if [[ "$deployment_mode" != bootstrap-only ]]; then
+        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: deploy" "          ansible_port: $target_port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" >"$inventory"
+        if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/site.yml" --private-key "$key_file"; then
+            :
+        else
+            rc=$?
+            rm -f "$before" "$extra" "$key_file" "$host_key_file" "$known_hosts_file"
+            rm -rf "$inventory_dir"
+            return "$rc"
+        fi
     fi
 
     if [[ -n "$state_file" || "$user" == root || -n "$bootstrap" || -n "$bootstrap_password" ]]; then

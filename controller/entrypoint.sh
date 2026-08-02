@@ -532,7 +532,7 @@ add_vpn_server_menu() {
         if ! read_required_choice choice '?: ' '1, 2, or b, m, i, x'; then continue; fi
         case "$choice" in
             1) add_node || true; return ;;
-            2) cascade_deployments || true; return ;;
+            2) add_cascade || true; return ;;
             b) return ;;
             m) MAIN_MENU_REQUESTED=1; return ;;
             i) show_info add-node ;;

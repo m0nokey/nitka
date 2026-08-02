@@ -25,6 +25,15 @@ def node_status(node, diagnostics=None):
     return node.get("status", "Active")
 
 
+def cascade_node_diagnostics(role, node):
+    diagnostics = node_diagnostics(node)
+    if role == "egress":
+        diagnostics["status"] = (
+            "Active" if diagnostics["management"].get("ssh") == "connected" else "Unreachable"
+        )
+    return diagnostics
+
+
 def deployment_data(state, deployment_id):
     deployment = state.get("deployments", {}).get(deployment_id)
     if not isinstance(deployment, dict):
@@ -84,10 +93,13 @@ def main():
         if args.check:
             rows = deployment_data(state, args.deployment)
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-                futures = {pool.submit(node_diagnostics, node): node for _, node in rows}
+                futures = {
+                    pool.submit(cascade_node_diagnostics, role, node): node
+                    for role, node in rows
+                }
                 diagnostics = {id(node): future.result() for future, node in futures.items()}
         render(state, args.deployment, diagnostics)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
 

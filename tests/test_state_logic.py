@@ -191,6 +191,26 @@ class StateCliTests(unittest.TestCase):
             "node-a",
         )
 
+    def test_share_management_key_copies_only_management_credentials(self):
+        state = self.fixture_state()
+        state["nodes"]["node-b"] = {
+            "host": "192.0.2.20",
+            "management_private_key": "other-private-key",
+            "management_authorized_key": "ssh-ed25519 other",
+            "xray": {"vision_port": 443},
+        }
+        result = self.run_cli(state, "share-management-key", "node-a", "node-b")
+
+        self.assertEqual(
+            result["nodes"]["node-b"]["management_private_key"],
+            result["nodes"]["node-a"]["management_private_key"],
+        )
+        self.assertEqual(
+            result["nodes"]["node-b"]["management_authorized_key"],
+            result["nodes"]["node-a"]["management_authorized_key"],
+        )
+        self.assertEqual(result["nodes"]["node-b"]["xray"], {"vision_port": 443})
+
     def test_add_cascade_rejects_missing_node(self):
         result = subprocess.run(
             [
