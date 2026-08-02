@@ -5,8 +5,8 @@ configuration. A deployment only describes relationships between nodes and
 the services selected for that deployment.
 """
 
-from copy import deepcopy
 import re
+from copy import deepcopy
 
 
 SCHEMA_VERSION = 1
@@ -21,9 +21,9 @@ _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 def _state_copy(state):
     if not isinstance(state, dict):
-        raise ValueError("state must be an object")
+        raise TypeError("state must be an object")
     if not isinstance(state.get("nodes"), dict):
-        raise ValueError("state must contain a nodes object")
+        raise TypeError("state must contain a nodes object")
     return deepcopy(state)
 
 
@@ -77,7 +77,7 @@ def attach_cascade(state, deployment_id, ingress_node, egress_node):
     result = _state_copy(state)
     deployments = result.setdefault("deployments", {})
     if not isinstance(deployments, dict):
-        raise ValueError("state deployments must be an object")
+        raise TypeError("state deployments must be an object")
     if deployment_id in deployments:
         raise ValueError(f"deployment already exists: {deployment_id}")
     if ingress_node not in result["nodes"]:
@@ -95,24 +95,24 @@ def attach_cascade(state, deployment_id, ingress_node, egress_node):
 def validate_deployments(state):
     """Validate deployment references without inspecting secret values."""
     if not isinstance(state, dict) or not isinstance(state.get("nodes"), dict):
-        raise ValueError("state must contain a nodes object")
+        raise TypeError("state must contain a nodes object")
     deployments = state.get("deployments", {})
     if not isinstance(deployments, dict):
-        raise ValueError("state deployments must be an object")
+        raise TypeError("state deployments must be an object")
 
     for deployment_id, deployment in deployments.items():
         _validate_identifier(deployment_id, "deployment id")
         if not isinstance(deployment, dict):
-            raise ValueError(f"deployment must be an object: {deployment_id}")
+            raise TypeError(f"deployment must be an object: {deployment_id}")
         if deployment.get("topology") != TOPOLOGY_CASCADE:
             raise ValueError(f"unsupported deployment topology: {deployment_id}")
         roles = deployment.get("roles")
         if not isinstance(roles, dict):
-            raise ValueError(f"deployment roles must be an object: {deployment_id}")
+            raise TypeError(f"deployment roles must be an object: {deployment_id}")
         for role in (ROLE_INGRESS, ROLE_EGRESS):
             selected = roles.get(role)
             if not isinstance(selected, dict):
-                raise ValueError(f"missing deployment role: {deployment_id}/{role}")
+                raise TypeError(f"missing deployment role: {deployment_id}/{role}")
             node = selected.get("node")
             if node not in state["nodes"]:
                 raise ValueError(f"deployment node not found: {deployment_id}/{role}")

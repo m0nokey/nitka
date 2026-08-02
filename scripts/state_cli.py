@@ -12,8 +12,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from nacl.public import PrivateKey
 from deployment_logic import attach_cascade
+from nacl.public import PrivateKey
 from state_logic import generated_port, generated_vpn_ports
 
 COUNTRIES_FILE = Path(__file__).resolve().parent.parent / "data" / "countries.tsv"

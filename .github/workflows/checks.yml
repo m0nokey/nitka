@@ -231,6 +231,7 @@ jobs:
           scan-type: config
           scan-ref: .
           trivy-config: .github/ci/trivy.yaml
+          trivyignores: .trivyignore.yaml
           version: v0.72.0
           format: table
           exit-code: '1'
