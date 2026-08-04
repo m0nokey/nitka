@@ -12,15 +12,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from nacl.public import PrivateKey
 from deployment_logic import (
-    CASCADE_DEFAULT_SETTINGS,
     CASCADE_RPZ_PROFILES,
     CASCADE_RPZ_SOURCES,
     attach_cascade,
     cascade_ansible_vars,
     normalize_cascade_transport,
 )
+from nacl.public import PrivateKey
 from routing_policy import import_routing_policy
 from state_logic import build_port_mapping, generated_port, generated_vpn_ports
 from transport_registry import validate_access_transport
@@ -75,7 +74,10 @@ def ip_info(host):
 
 def reality_keys():
     key = PrivateKey.generate()
-    encode = lambda value: base64.urlsafe_b64encode(value).decode().rstrip("=")
+
+    def encode(value):
+        return base64.urlsafe_b64encode(value).decode().rstrip("=")
+
     return encode(key.encode()), encode(key.public_key.encode())
 
 

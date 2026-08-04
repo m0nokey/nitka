@@ -334,7 +334,7 @@ def normalize_cascade_transport(state, deployment_id):
     egress = result["nodes"][egress_node]
     settings = _deep_merge(CASCADE_DEFAULT_SETTINGS, deployment.get("settings", {}))
     ssh_tun = settings["ssh_tun"]
-    transport = _legacy_ssh_tun_values(result, deployment, egress, ssh_tun)
+    _legacy_ssh_tun_values(result, deployment, egress, ssh_tun)
     reserved = _cascade_reserved_ports(egress)
     try:
         port = int(ssh_tun.get("port"))

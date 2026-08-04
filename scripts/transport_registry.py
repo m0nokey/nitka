@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 TOPOLOGY_STANDALONE = "standalone"
 TOPOLOGY_CASCADE = "cascade"
 PLANE_ACCESS = "access"
@@ -180,7 +179,7 @@ def validate_deployment_transports(deployment: dict) -> dict:
     topology = deployment.get("topology")
     selected = deployment.get("transports")
     if not isinstance(selected, dict):
-        raise ValueError("deployment must contain a transports object")
+        raise TypeError("deployment must contain a transports object")
     access = selected.get("access", {}).get("transport")
     backhaul = selected.get("backhaul", {}).get("transport")
     return validate_transport_plan(topology, access, backhaul)

@@ -8,7 +8,6 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 ROUTING_FIELDS = (
     "block_domains",
     "block_ips",

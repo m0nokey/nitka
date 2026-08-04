@@ -265,9 +265,9 @@ def node_diagnostics(node):
         status = "Unreachable"
     elif not ssh_reachable:
         status = "VPN unavailable"
-    elif service_running and not ports:
-        status = "Active"
-    elif service_running and len(probes) == 2 and all(probes):
+    elif service_running and (
+        not ports or (len(probes) == 2 and all(probes))
+    ):
         status = "Active"
     elif service_running and any(probes):
         status = "Partial"
@@ -375,7 +375,8 @@ def main():
                   for host, country, created, status, provider, _ in rows]
         widths = [max(len(headers[i]), *(len(row[i]) for row in values)) for i in range(5)]
         number_width = len(str(len(rows)))
-        row_prefix = lambda number: f"  {number:>{number_width}}.   "
+        def row_prefix(number):
+            return f"  {number:>{number_width}}.   "
         print(color(" " * len(row_prefix(1)) + "   ".join(headers[i].ljust(widths[i]) for i in range(5)).rstrip(), BLUE))
         print()
         for index, (host, country, created, status, provider, _) in enumerate(rows, 1):
