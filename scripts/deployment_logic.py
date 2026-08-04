@@ -11,8 +11,20 @@ from copy import deepcopy
 
 try:
     from .state_logic import generated_port
+    from .transport_registry import (
+        TRANSPORT_SSH_TUN,
+        TRANSPORT_XRAY_REALITY,
+        validate_deployment_transports,
+        validate_transport_plan,
+    )
 except ImportError:  # pragma: no cover - direct execution through state_cli.py
     from state_logic import generated_port
+    from transport_registry import (
+        TRANSPORT_SSH_TUN,
+        TRANSPORT_XRAY_REALITY,
+        validate_deployment_transports,
+        validate_transport_plan,
+    )
 
 SCHEMA_VERSION = 1
 TOPOLOGY_CASCADE = "cascade"
@@ -377,6 +389,10 @@ def cascade_deployment(deployment_id, ingress_node, egress_node):
                 "transport": TRANSPORT_EXISTING_XRAY,
             },
         },
+        "transports": {
+            "access": {"transport": TRANSPORT_XRAY_REALITY},
+            "backhaul": {"transport": TRANSPORT_SSH_TUN},
+        },
         "services": {
             "ssh_tun": {"enabled": True},
             "dns": {"backend": "unbound"},
@@ -430,6 +446,18 @@ def validate_deployments(state):
         roles = deployment.get("roles")
         if not isinstance(roles, dict):
             raise TypeError(f"deployment roles must be an object: {deployment_id}")
+        if "transports" in deployment:
+            validate_deployment_transports(deployment)
+        else:
+            # Read old state written before the modular transport contract.
+            # It remains valid while the new block is introduced gradually.
+            validate_transport_plan(
+                deployment.get("topology"),
+                TRANSPORT_XRAY_REALITY,
+                TRANSPORT_SSH_TUN
+                if deployment.get("services", {}).get("ssh_tun", {}).get("enabled")
+                else None,
+            )
         for role in (ROLE_INGRESS, ROLE_EGRESS):
             selected = roles.get(role)
             if not isinstance(selected, dict):

@@ -26,6 +26,13 @@ class DeploymentLogicTests(unittest.TestCase):
         deployment = cascade_deployment("cascade-1", "ingress-node", "egress-node")
 
         self.assertEqual(deployment["topology"], "cascade")
+        self.assertEqual(
+            deployment["transports"],
+            {
+                "access": {"transport": "xray-reality"},
+                "backhaul": {"transport": "ssh-tun"},
+            },
+        )
         self.assertEqual(deployment["roles"]["ingress"]["backend"], BACKEND_XRAY)
         self.assertEqual(
             deployment["roles"]["egress"]["transport"], TRANSPORT_EXISTING_XRAY
