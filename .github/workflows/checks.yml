@@ -32,6 +32,9 @@ jobs:
         with:
           fetch-depth: 2
 
+      - name: Fetch main reference for golden-state tests
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -92,6 +95,8 @@ jobs:
             ansible/remove.yml \
             ansible/restart.yml \
             ansible/rotate-ssh.yml \
+            ansible/cascade_ingress.yml \
+            ansible/cascade_egress.yml \
             ansible/site.yml; do
             ansible-playbook --syntax-check \
               -i 'xray_nodes,' -c local "$playbook"

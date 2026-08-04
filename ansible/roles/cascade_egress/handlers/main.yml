@@ -2,6 +2,10 @@
 - name: Restart egress stack
   ansible.builtin.shell: |
     set -uo pipefail
+    backhaul_service="{{ transport_backhaul_service_name | default('ssh_tun_server') }}"
+    backhaul_container="{{ transport_backhaul_container_name | default('cascade-ssh-tun-server') }}"
+    backhaul_context="{{ transport_backhaul_build_context | default('ssh_tun_server') }}"
+    backhaul_image="{{ transport_backhaul_image | default('local/cascade-ssh-tun-server:latest') }}"
     stack_change=0
     recover_previous() {
       latest=/var/lib/nitka/backup/cascade-egress.latest
@@ -36,7 +40,7 @@
       systemctl disable --now "$unit" >/dev/null 2>&1 || true
     done
     docker compose -f "{{ cascade_egress_remote_dir }}/compose.yml" down --remove-orphans >/dev/null 2>&1 || true
-    for container in cascade-ssh-tun-server cascade-unbound; do
+    for container in "$backhaul_container" cascade-unbound; do
       if docker inspect "$container" >/dev/null 2>&1; then
         docker update --restart=no "$container" >/dev/null 2>&1 || true
         docker stop "$container" >/dev/null 2>&1 || true
@@ -53,13 +57,16 @@
       container="$1"
       timeout="$2"
       report_failure() {
-        docker inspect -f "$container state={% raw %}{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
+        inspect_format="$container state={% raw %}{{.State.Status}} exit={{.State.ExitCode}}{% endraw %}"
+        inspect_format="$inspect_format error={% raw %}{{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}"
+        docker inspect -f "$inspect_format" "$container" 2>/dev/null || true
         echo "===== $container logs =====" >&2
         docker logs --tail=200 "$container" 2>&1 || true
       }
       end=$((SECONDS + timeout))
       while [ "$SECONDS" -lt "$end" ]; do
-        status="$(docker inspect -f '{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}{% endraw %}' "$container" 2>/dev/null || true)"
+        health_format='{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}{% endraw %}'
+        status="$(docker inspect -f "$health_format" "$container" 2>/dev/null || true)"
         [ "$status" = "healthy" ] && return 0
         [ "$status" = "unhealthy" ] || [ "$status" = "exited" ] || [ "$status" = "dead" ] || {
           sleep 2
@@ -90,12 +97,12 @@
         printf '%s\n' "$fingerprint" > "$state_file"
       fi
     }
-    build_if_needed ssh_tun_server local/cascade-ssh-tun-server:latest ./ssh_tun_server || exit 1
+    build_if_needed "$backhaul_service" "$backhaul_image" "./$backhaul_context" || exit 1
     build_if_needed unbound local/cascade-unbound:latest ./dns || exit 1
     docker compose up -d --no-build --remove-orphans
     rc1=$?
     [ "$rc1" -eq 0 ] || exit 1
-    wait_healthy cascade-ssh-tun-server 120 || exit 1
+    wait_healthy "$backhaul_container" 120 || exit 1
     if [ "$cascade_egress_debug" = "1" ]; then
       echo "===== docker compose recreate unbound ====="
     fi
@@ -113,13 +120,13 @@
       inspect_format="$inspect_format restarting={{.State.Restarting}} exit={{.State.ExitCode}}"
       inspect_format="$inspect_format error={{.State.Error}} health={{if .State.Health}}"
       inspect_format="$inspect_format{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}"
-      for container in cascade-ssh-tun-server cascade-unbound; do
+      for container in "$backhaul_container" cascade-unbound; do
         docker inspect -f "$inspect_format" "$container" 2>/dev/null || true
       done
       echo "===== docker compose logs ====="
       docker compose logs --tail=160 || true
       echo "===== direct container logs ====="
-      for container in cascade-ssh-tun-server cascade-unbound; do
+      for container in "$backhaul_container" cascade-unbound; do
         echo "----- $container -----"
         docker logs --tail=120 "$container" 2>&1 || true
       done

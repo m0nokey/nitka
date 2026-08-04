@@ -112,8 +112,8 @@
       "settings": {
         "servers": [
           {
-            "address": "ssh_tun_client",
-            "port": {{ cascade_ingress_clash_port }}
+            "address": "{{ transport_backhaul_proxy_host | default('ssh_tun_client') }}",
+            "port": {{ transport_backhaul_proxy_port | default(cascade_ingress_clash_port) }}
           }
         ]
       }
@@ -133,7 +133,7 @@
     "servers": [
 {% if xray_dns_egress_only %}
       {
-        "address": "{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}",
+        "address": "{{ transport_backhaul_dns_address | default(cascade_ssh_tun_network_vpn_gateway_ipv4) }}",
         "port": 53,
         "skipFallback": true,
         "finalQuery": true
@@ -141,7 +141,7 @@
 {% else %}
 {% if xray_dns_proxy_domains | length > 0 %}
       {
-        "address": "{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}",
+        "address": "{{ transport_backhaul_dns_address | default(cascade_ssh_tun_network_vpn_gateway_ipv4) }}",
         "port": 53,
         "domains": {{ xray_dns_proxy_domains | to_json }},
         "skipFallback": true,
@@ -165,7 +165,7 @@
       {
         "type": "field",
         "inboundTag": ["dns"],
-        "ip": ["{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}"],
+        "ip": ["{{ transport_backhaul_dns_address | default(cascade_ssh_tun_network_vpn_gateway_ipv4) }}"],
         "outboundTag": "proxy"
       },
       {

@@ -1,0 +1,45 @@
+---
+- name: Validate SSH TUN backhaul adapter selection
+  ansible.builtin.assert:
+    that:
+      - ssh_tun_transport | default('ssh-tun') == 'ssh-tun'
+      - ssh_tun_endpoint | default('') in ['client', 'server']
+    fail_msg: >-
+      The SSH TUN adapter requires ssh_tun_transport=ssh-tun and an endpoint
+      of client or server.
+  changed_when: false
+
+- name: Publish SSH TUN client runtime contract  # noqa var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    transport_backhaul_service_name: ssh_tun_client
+    transport_backhaul_container_name: cascade-ssh-tun-client
+    transport_backhaul_remote_dir_name: ssh_tun_client
+    transport_backhaul_proxy_host: ssh_tun_client
+    transport_backhaul_proxy_port: "{{ cascade_ingress_clash_port }}"
+    transport_backhaul_dns_address: "{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}"
+    transport_backhaul_interface: "{{ cascade_ssh_tun_network_interface }}"
+    transport_backhaul_image: local/cascade-ssh-tun-client:latest
+    transport_backhaul_build_context: ssh_tun_client
+  when: ssh_tun_endpoint == 'client'
+  changed_when: false
+
+- name: Publish SSH TUN server runtime contract  # noqa var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    transport_backhaul_service_name: ssh_tun_server
+    transport_backhaul_container_name: cascade-ssh-tun-server
+    transport_backhaul_remote_dir_name: ssh_tun_server
+    transport_backhaul_external_port: "{{ cascade_ssh_tun_ssh_port }}"
+    transport_backhaul_internal_port: "{{ cascade_ssh_tun_container_port }}"
+    transport_backhaul_container_ipv4: "{{ cascade_ssh_tun_network_container_vpn_ipv4 }}"
+    transport_backhaul_container_subnet: "{{ cascade_ssh_tun_network_container_subnet_cidr_ipv4 }}"
+    transport_backhaul_container_gateway: "{{ cascade_ssh_tun_network_container_gateway_ipv4 }}"
+    transport_backhaul_image: local/cascade-ssh-tun-server:latest
+    transport_backhaul_build_context: ssh_tun_server
+  when: ssh_tun_endpoint == 'server'
+  changed_when: false
+
+- name: Configure SSH TUN endpoint
+  ansible.builtin.include_role:
+    name: cascade_ssh_tun
+  vars:
+    cascade_ssh_tun_endpoint: "{{ ssh_tun_endpoint }}"

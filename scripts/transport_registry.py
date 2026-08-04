@@ -37,7 +37,7 @@ ACCESS_ADAPTERS = {
     TRANSPORT_XRAY_REALITY: TransportAdapter(
         name=TRANSPORT_XRAY_REALITY,
         plane=PLANE_ACCESS,
-        implementation_role="xray",
+        implementation_role="transports/access/xray",
         supported_topologies=(TOPOLOGY_STANDALONE, TOPOLOGY_CASCADE),
         implemented=True,
     ),
@@ -61,7 +61,7 @@ BACKHAUL_ADAPTERS = {
     TRANSPORT_SSH_TUN: TransportAdapter(
         name=TRANSPORT_SSH_TUN,
         plane=PLANE_BACKHAUL,
-        implementation_role="cascade_ssh_tun",
+        implementation_role="transports/backhaul/ssh_tun",
         supported_topologies=(TOPOLOGY_CASCADE,),
         implemented=True,
     ),

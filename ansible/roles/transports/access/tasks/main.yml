@@ -1,0 +1,24 @@
+---
+- name: Validate access transport selection
+  ansible.builtin.assert:
+    that:
+      - access_transport | default('xray-reality') in ['xray-reality', 'existing-xray']
+    fail_msg: >-
+      Unsupported or unavailable access transport:
+      {{ access_transport | default('undefined') }}.
+      The dispatcher currently implements xray-reality only.
+  changed_when: false
+
+- name: Normalize access transport alias  # noqa var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    access_selected_transport: >-
+      {{ 'xray-reality' if (access_transport | default('xray-reality')) == 'existing-xray'
+         else (access_transport | default('xray-reality')) }}
+  changed_when: false
+
+- name: Dispatch Xray REALITY access adapter
+  ansible.builtin.include_role:
+    name: transports/access/xray  # noqa role-name[path]
+  vars:
+    xray_access_transport: "{{ access_selected_transport }}"
+    xray_access_topology: "{{ access_topology | default('standalone') }}"

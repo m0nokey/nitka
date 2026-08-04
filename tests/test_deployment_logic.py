@@ -176,6 +176,15 @@ class DeploymentLogicTests(unittest.TestCase):
             "192.0.2.20",
         )
         self.assertEqual(
+            variables["cascade_ingress_access_transport"], "xray-reality"
+        )
+        self.assertEqual(
+            variables["cascade_ingress_backhaul_transport"], "ssh-tun"
+        )
+        self.assertEqual(
+            variables["cascade_egress_backhaul_transport"], "ssh-tun"
+        )
+        self.assertEqual(
             variables["cascade_ingress_harden_ssh_preserve_users"],
             ["legacy-ingress-user", "legacy-bootstrap"],
         )

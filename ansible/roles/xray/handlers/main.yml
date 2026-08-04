@@ -8,7 +8,8 @@
       timeout_seconds="$2"
       end=$((SECONDS + timeout_seconds))
       while [ "$SECONDS" -lt "$end" ]; do
-        status="$(docker inspect -f '{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}{% endraw %}' "$container" 2>/dev/null || true)"
+        health_format='{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}{% endraw %}'
+        status="$(docker inspect -f "$health_format" "$container" 2>/dev/null || true)"
         [ "$status" = "healthy" ] && return 0
         [ "$status" = "exited" ] || [ "$status" = "dead" ] || {
           sleep 2

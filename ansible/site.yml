@@ -14,4 +14,7 @@
       ansible.builtin.setup:
   roles:
     - role: system_base
-    - role: xray
+    - role: transports/access  # noqa role-name[path]
+      vars:
+        access_topology: standalone
+        access_transport: "{{ xray_access_transport | default('xray-reality') }}"

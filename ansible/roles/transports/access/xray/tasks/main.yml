@@ -1,0 +1,20 @@
+---
+- name: Validate Xray REALITY access adapter selection
+  ansible.builtin.assert:
+    that:
+      - xray_access_transport | default('xray-reality') == 'xray-reality'
+      - xray_access_topology | default('standalone') in ['standalone', 'cascade']
+    fail_msg: >-
+      The Xray access adapter cannot handle transport
+      '{{ xray_access_transport | default('undefined') }}'.
+  changed_when: false
+
+- name: Configure standalone Xray access endpoint
+  ansible.builtin.include_role:
+    name: xray
+  when: xray_access_topology | default('standalone') == 'standalone'
+
+- name: Configure Cascade Xray access endpoint
+  ansible.builtin.include_role:
+    name: cascade_ingress
+  when: xray_access_topology | default('standalone') == 'cascade'

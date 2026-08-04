@@ -207,13 +207,29 @@ class CascadeRuntimeTests(unittest.TestCase):
         client = self.read("ansible/roles/cascade_ssh_tun/templates/client/ssh_config.j2")
         known_hosts = self.read("ansible/roles/cascade_ssh_tun/templates/client/known_hosts.j2")
         self.assertIn(
-            '"{{ cascade_ssh_tun_ssh_port }}:{{ cascade_ssh_tun_container_port }}"',
+            '"{{ transport_backhaul_external_port | default(cascade_ssh_tun_ssh_port) }}:'
+            '{{ transport_backhaul_internal_port | default(cascade_ssh_tun_container_port) }}"',
             compose,
         )
         self.assertIn("Port {{ cascade_ssh_tun_ssh_port }}", client)
         self.assertNotIn("Port 22", client)
         self.assertIn("cascade_ssh_tun_host_public_key", known_hosts)
         self.assertIn("lookup('file', cascade_ssh_tun_ssh_key_dir ~ '/ssh_host_ed25519_key.pub')", known_hosts)
+
+    def test_cascade_runtime_consumes_backhaul_contract(self):
+        ingress = self.read("ansible/roles/cascade_ingress/templates/compose.yml.j2")
+        ensure = self.read(
+            "ansible/roles/cascade_ingress/templates/ingress_stack_ensure.sh.j2"
+        )
+        watchdog = self.read(
+            "ansible/roles/cascade_ingress/templates/cascade-ingress-watchdog.sh.j2"
+        )
+        egress = self.read("ansible/roles/cascade_egress/templates/compose.yml.j2")
+        handler = self.read("ansible/roles/cascade_egress/handlers/main.yml")
+
+        for content in (ingress, ensure, watchdog, egress, handler):
+            self.assertIn("transport_backhaul_service_name", content)
+            self.assertIn("transport_backhaul_container_name", content)
 
     def test_cascade_updater_is_stopped_during_deployment(self):
         ingress = self.read("ansible/roles/cascade_ingress/tasks/main.yml")

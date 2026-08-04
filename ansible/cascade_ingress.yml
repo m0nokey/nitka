@@ -34,8 +34,8 @@
         system_base_docker_updater_calendar: "*-*-* 02:20"
         system_base_docker_updater_compose_file: "{{ cascade_ingress_remote_dir }}/compose.yml"
         system_base_docker_updater_services:
-          - service: ssh_tun_client
-            container: cascade-ssh-tun-client
+          - service: "{{ cascade_ingress_backhaul_service_name | default('ssh_tun_client') }}"
+            container: "{{ cascade_ingress_backhaul_container_name | default('cascade-ssh-tun-client') }}"
             image_type: build
             base_image: alpine:3.23
             cascade_restart:
@@ -55,8 +55,13 @@
             image: local/cascade-xray-core:auto
             release_repo: XTLS/Xray-core
             release_image_template: ghcr.io/xtls/xray-core:latest
-    - role: cascade_ssh_tun
+    - role: transports/backhaul  # noqa role-name[path]
       vars:
-        cascade_ssh_tun_endpoint: client
-      when: cascade_ingress_manage_ssh_tun | default(true) | bool
-    - role: cascade_ingress
+        backhaul_endpoint: client
+        backhaul_transport: "{{ cascade_ingress_backhaul_transport | default('ssh-tun') }}"
+      when:
+        - cascade_ingress_manage_backhaul | default(true) | bool
+    - role: transports/access  # noqa role-name[path]
+      vars:
+        access_topology: cascade
+        access_transport: "{{ cascade_ingress_access_transport | default('xray-reality') }}"

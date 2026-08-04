@@ -14,4 +14,8 @@ Responsibilities:
 - pass traffic to the topology routing layer;
 - keep access credentials separate from management and backhaul credentials.
 
+The adapter dispatches to the standalone `xray` runtime or the Cascade ingress
+runtime according to the selected topology. The topology is the composition
+boundary; Xray remains the access transport implementation.
+
 The currently supported public client profile is Shadowrocket for iOS/macOS.

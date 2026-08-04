@@ -2,10 +2,10 @@
 set -eu
 
 compose_dir="{{ cascade_ingress_remote_dir }}"
-ssh_service="ssh_tun_client"
+ssh_service="{{ transport_backhaul_service_name | default('ssh_tun_client') }}"
 clash_service="clashrs"
 xray_service="xray"
-ssh_container="cascade-ssh-tun-client"
+ssh_container="{{ transport_backhaul_container_name | default('cascade-ssh-tun-client') }}"
 clash_container="cascade-clashrs"
 xray_container="cascade-xray"
 clash_port="{{ cascade_ingress_clash_port }}"

@@ -4,7 +4,7 @@ allow-lan: true
 bind-address: 0.0.0.0
 mode: direct
 log-level: silent
-interface-name: {{ cascade_ssh_tun_network_interface }}
+interface-name: {{ transport_backhaul_interface | default(cascade_ssh_tun_network_interface) }}
 tcp-concurrent: {{ cascade_ingress_clash_tcp_concurrent | ternary('true', 'false') }}
 external-controller: 127.0.0.1:9090
 
@@ -12,4 +12,4 @@ dns:
   enable: true
   ipv6: false
   nameserver:
-    - {{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}
+    - {{ transport_backhaul_dns_address | default(cascade_ssh_tun_network_vpn_gateway_ipv4) }}

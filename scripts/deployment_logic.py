@@ -569,7 +569,35 @@ def cascade_ansible_vars(state, deployment_id, local_root):
     remote_root = str(settings["remote_root"]).rstrip("/")
     deployment_root = f"{local_root}/{deployment_id}"
 
+    if "transports" in deployment:
+        transport_plan = validate_deployment_transports(deployment)
+    else:
+        transport_plan = validate_transport_plan(
+            TOPOLOGY_CASCADE,
+            TRANSPORT_XRAY_REALITY,
+            TRANSPORT_SSH_TUN,
+        )
+    access_transport = next(
+        binding["transport"]
+        for binding in transport_plan["bindings"]
+        if binding["node_role"] == ROLE_INGRESS
+        and binding["plane"] == "access"
+    )
+    backhaul_transport = next(
+        binding["transport"]
+        for binding in transport_plan["bindings"]
+        if binding["node_role"] == ROLE_INGRESS
+        and binding["plane"] == "backhaul"
+    )
+
     vars_ = {
+        "cascade_ingress_access_transport": access_transport,
+        "cascade_ingress_backhaul_transport": backhaul_transport,
+        "cascade_egress_backhaul_transport": backhaul_transport,
+        "cascade_ingress_backhaul_service_name": "ssh_tun_client",
+        "cascade_ingress_backhaul_container_name": "cascade-ssh-tun-client",
+        "cascade_egress_backhaul_service_name": "ssh_tun_server",
+        "cascade_egress_backhaul_container_name": "cascade-ssh-tun-server",
         "system_base_deploy_user": "deploy",
         "cascade_ingress_harden_ssh_initial_user": ingress.get(
             "management_user", "deploy"

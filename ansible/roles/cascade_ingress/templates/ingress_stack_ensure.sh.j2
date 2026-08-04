@@ -2,6 +2,10 @@
 set -uo pipefail
 
 cascade_ingress_debug="{{ cascade_ingress_debug | default(false) | bool | ternary('1', '0') }}"
+backhaul_service="{{ transport_backhaul_service_name | default('ssh_tun_client') }}"
+backhaul_container="{{ transport_backhaul_container_name | default('cascade-ssh-tun-client') }}"
+backhaul_context="{{ transport_backhaul_build_context | default('ssh_tun_client') }}"
+backhaul_image="{{ transport_backhaul_image | default('local/cascade-ssh-tun-client:latest') }}"
 
 wait_healthy() {
     container="$1"
@@ -133,7 +137,7 @@ if [ "$cascade_ingress_debug" = "1" ]; then
     echo "===== docker compose up ====="
 fi
 
-build_if_needed ssh_tun_client local/cascade-ssh-tun-client:latest ./ssh_tun_client || exit 1
+build_if_needed "$backhaul_service" "$backhaul_image" "./$backhaul_context" || exit 1
 resolve_release_image clashrs Watfaq/clash-rs 'ghcr.io/watfaq/clash-rs:latest' local/cascade-clash-rs:latest || exit 1
 resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:latest' local/cascade-xray-core:auto || exit 1
 
@@ -151,13 +155,13 @@ validate_reality_target || exit 1
 # Keep the SSH tunnel container stable. Config changes are applied by recreating
 # only services that depend on its network namespace, so deploys do not tear down
 # the whole ingress stack and do not wipe anonymous volumes.
-docker compose up -d --no-build --remove-orphans --no-deps ssh_tun_client || exit 1
-wait_healthy cascade-ssh-tun-client {{ cascade_ingress_ssh_startup_timeout_seconds | default(180) }} || exit 1
+docker compose up -d --no-build --remove-orphans --no-deps "$backhaul_service" || exit 1
+wait_healthy "$backhaul_container" {{ cascade_ingress_ssh_startup_timeout_seconds | default(180) }} || exit 1
 remove_ingress_dependents || exit 1
 
 start_clash() {
     docker compose up -d --force-recreate --no-deps clashrs || return 1
-    wait_shared_port cascade-ssh-tun-client {{ cascade_ingress_clash_port }} 45 || return 1
+    wait_shared_port "$backhaul_container" {{ cascade_ingress_clash_port }} 45 || return 1
     wait_healthy cascade-clashrs {{ cascade_ingress_clash_startup_timeout_seconds | default(180) }} || return 1
 }
 
@@ -179,13 +183,13 @@ if [ "$cascade_ingress_debug" = "1" ]; then
     echo "===== docker ps ====="
     docker ps -a --format 'table {% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}{% endraw %}' || true
     echo "===== container state ====="
-    for container in cascade-ssh-tun-client cascade-clashrs cascade-xray; do
+    for container in "$backhaul_container" cascade-clashrs cascade-xray; do
         docker inspect -f "$container state={% raw %}{{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
     done
     echo "===== docker compose logs ====="
     docker compose logs --tail=200 || true
     echo "===== direct container logs ====="
-    for container in cascade-ssh-tun-client cascade-clashrs cascade-xray; do
+    for container in "$backhaul_container" cascade-clashrs cascade-xray; do
         echo "----- $container -----"
         docker logs --tail=120 "$container" 2>&1 || true
     done

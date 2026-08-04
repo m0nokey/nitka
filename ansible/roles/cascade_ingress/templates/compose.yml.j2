@@ -1,13 +1,13 @@
 name: cascade-ingress
 
 services:
-  ssh_tun_client:
-    container_name: cascade-ssh-tun-client
+  {{ transport_backhaul_service_name | default('ssh_tun_client') }}:
+    container_name: {{ transport_backhaul_container_name | default('cascade-ssh-tun-client') }}
     build:
-      context: ./ssh_tun_client
+      context: ./{{ transport_backhaul_remote_dir_name | default('ssh_tun_client') }}
     image: local/cascade-ssh-tun-client:latest
     env_file:
-      - ./ssh_tun_client/security.env
+      - ./{{ transport_backhaul_remote_dir_name | default('ssh_tun_client') }}/security.env
     cap_drop:
       - ALL
     cap_add:
@@ -26,9 +26,9 @@ services:
       retries: {{ cascade_ingress_ssh_healthcheck_retries | default(2) }}
       start_period: {{ cascade_ingress_ssh_healthcheck_start_period | default('5s') }}
     volumes:
-      - ./ssh_tun_client:/ssh:ro
+      - ./{{ transport_backhaul_remote_dir_name | default('ssh_tun_client') }}:/ssh:ro
     dns:
-      - {{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}
+      - {{ transport_backhaul_dns_address | default(cascade_ssh_tun_network_vpn_gateway_ipv4) }}
     dns_search: []
     networks:
       - cascade_ingress
@@ -47,14 +47,14 @@ services:
   clashrs:
     container_name: cascade-clashrs
     image: local/cascade-clash-rs:latest
-    network_mode: "service:ssh_tun_client"
+    network_mode: "service:{{ transport_backhaul_service_name | default('ssh_tun_client') }}"
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     init: true
     depends_on:
-      ssh_tun_client:
+      {{ transport_backhaul_service_name | default('ssh_tun_client') }}:
         condition: service_healthy
     restart: unless-stopped
     volumes:

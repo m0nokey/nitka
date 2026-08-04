@@ -34,8 +34,8 @@
         system_base_docker_updater_calendar: "*-*-* 02:00"
         system_base_docker_updater_compose_file: "{{ cascade_egress_remote_dir }}/compose.yml"
         system_base_docker_updater_services:
-          - service: ssh_tun_server
-            container: cascade-ssh-tun-server
+          - service: "{{ cascade_egress_backhaul_service_name | default('ssh_tun_server') }}"
+            container: "{{ cascade_egress_backhaul_container_name | default('cascade-ssh-tun-server') }}"
             image_type: build
             base_image: alpine:3.23
             cascade_restart:
@@ -44,7 +44,8 @@
             container: cascade-unbound
             image_type: build
             base_image: alpine:3.23
-    - role: cascade_ssh_tun
+    - role: transports/backhaul  # noqa role-name[path]
       vars:
-        cascade_ssh_tun_endpoint: server
+        backhaul_endpoint: server
+        backhaul_transport: "{{ cascade_egress_backhaul_transport | default('ssh-tun') }}"
     - role: cascade_egress

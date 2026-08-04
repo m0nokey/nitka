@@ -1,0 +1,18 @@
+---
+- name: Validate backhaul transport selection
+  ansible.builtin.assert:
+    that:
+      - backhaul_transport | default('ssh-tun') == 'ssh-tun'
+    fail_msg: >-
+      Unsupported or unavailable backhaul transport:
+      {{ backhaul_transport | default('undefined') }}.
+      The dispatcher currently implements ssh-tun only.
+    quiet: true
+  changed_when: false
+
+- name: Dispatch SSH TUN backhaul adapter
+  ansible.builtin.include_role:
+    name: transports/backhaul/ssh_tun  # noqa role-name[path]
+  vars:
+    ssh_tun_transport: "{{ backhaul_transport | default('ssh-tun') }}"
+    ssh_tun_endpoint: "{{ backhaul_endpoint | default('') }}"
