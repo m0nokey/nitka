@@ -184,8 +184,3 @@ def import_routing_policy(state, node_name, path):
         "effective": effective,
     }
     return state
-
-
-def routing_counts(state, node_name):
-    effective = state["nodes"][node_name]["xray"]["routing_policy"]["effective"]
-    return {key: len(value) for key, value in effective.items()}

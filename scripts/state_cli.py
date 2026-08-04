@@ -126,7 +126,6 @@ parser.add_argument(
         "count", "names", "extract", "extract-cascade", "mark-deployed",
         "set-management-key", "set-ssh-host-key", "set-bootstrap",
         "set-ssh-mapping", "set-management-user",
-        "set-cascade-transport-port",
         "normalize-cascade-transport",
         "capture-cascade-transport-keys",
         "set-dns-profile", "set-local-region", "remove-node", "add-node",
@@ -324,23 +323,6 @@ elif opts.action == "set-management-user":
         if previous not in preserved:
             preserved.append(previous)
     node["management_user"] = "deploy"
-elif opts.action == "set-cascade-transport-port":
-    if len(opts.args) != 2:
-        raise SystemExit("set-cascade-transport-port requires DEPLOYMENT_ID PORT")
-    deployment = state.get("deployments", {}).get(opts.args[0])
-    if not isinstance(deployment, dict):
-        raise SystemExit(f"deployment not found: {opts.args[0]}")
-    try:
-        transport_port = int(opts.args[1])
-    except ValueError as exc:
-        raise SystemExit("cascade transport port must be a number") from exc
-    if not 1025 <= transport_port <= 65535 or transport_port == 22:
-        raise SystemExit(
-            "cascade transport port must be between 1025 and 65535 and cannot be 22"
-        )
-    deployment.setdefault("settings", {}).setdefault("ssh_tun", {})[
-        "port"
-    ] = transport_port
 elif opts.action == "normalize-cascade-transport":
     if len(opts.args) != 1:
         raise SystemExit("normalize-cascade-transport requires DEPLOYMENT_ID")

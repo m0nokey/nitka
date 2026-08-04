@@ -281,10 +281,6 @@ def node_diagnostics(node):
     }
 
 
-def node_status(node):
-    return node_diagnostics(node)["status"]
-
-
 def endpoint_label(node, port):
     xray = node.get("xray", {})
     if port == xray.get("vision_port"):

@@ -260,10 +260,13 @@ class CascadeRuntimeTests(unittest.TestCase):
     def test_cascade_creation_runs_one_automatic_install_pipeline(self):
         deployment = self.read("lib/deployment.sh")
         runtime = deployment[
-            deployment.index("run_cascade_playbooks()") :
-            deployment.index("create_cascade_deployment")
+            deployment.index("run_cascade_playbooks()") : deployment.index(
+                "run_remove_with_management_key()"
+            )
         ]
-        create = deployment[deployment.index("create_cascade_deployment") :]
+        add = deployment[
+            deployment.index("add_cascade()") : deployment.index("deploy_node()")
+        ]
         egress = runtime.index(
             'if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_egress.yml"; then\n            :'
         )
@@ -274,10 +277,7 @@ class CascadeRuntimeTests(unittest.TestCase):
         )
         self.assertLess(egress, capture)
         self.assertLess(capture, ingress)
-        self.assertNotIn(
-            'run_cascade_playbooks "$deployment_id" "$after" management',
-            create,
-        )
+        self.assertEqual(add.count('run_cascade_playbooks "$deployment_id" "$cascade_state"'), 1)
 
     def test_routing_update_only_deploys_ingress(self):
         nodes = self.read("lib/nodes.sh")

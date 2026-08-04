@@ -14,15 +14,6 @@ local_internet_available() {
     return 1
 }
 
-show_nodes() {
-    local state
-    state="$(mktemp "$RUNTIME_TMP_DIR/.nodes.XXXXXX")"
-    if read_vault_state "$state"; then
-        python3 "$ROOT_DIR/scripts/render_nodes.py" --check <"$state"
-    fi
-    rm -f "$state"
-}
-
 show_node_status() {
     local node="$1" state
     state="$(mktemp "$RUNTIME_TMP_DIR/.node.XXXXXX")"
@@ -338,112 +329,6 @@ manage_cascade() {
     done
 }
 
-cascade_deployments() {
-    local state count names ingress_choice egress_choice deployment_id
-    local ingress_node egress_node action
-    local -a nodes
-    while true; do
-        clear_screen
-        state="$(mktemp "$RUNTIME_TMP_DIR/.cascade.XXXXXX")"
-        if ! read_vault_state "$state"; then
-            rm -f "$state"
-            return 1
-        fi
-        count="$(python3 "$ROOT_DIR/scripts/state_cli.py" count <"$state")"
-        if ((count < 2)); then
-            rm -f "$state"
-            menu_heading "Cascade VPN"
-            echo
-            printf '%s\n' "At least two deployed VPN servers are required."
-            echo
-            menu_control b back
-            menu_control m main
-            menu_control i info
-            menu_control x exit
-            echo
-            if ! read_required_choice action '?: ' 'b, m, i, or x'; then continue; fi
-            case "$action" in
-                b|B) return 0 ;;
-                m|M) MAIN_MENU_REQUESTED=1; return 0 ;;
-                i|I) show_info general ;;
-                x|X) exit_tui ;;
-                *) invalid_choice ;;
-            esac
-            continue
-        fi
-        names="$(python3 "$ROOT_DIR/scripts/state_cli.py" names <"$state")"
-        mapfile -t nodes <<<"$names"
-        rm -f "$state"
-
-        menu_heading "Create Cascade VPN"
-        echo
-        printf '%s\n' "Select the ingress server (public Xray entrypoint):"
-        local index
-        for index in "${!nodes[@]}"; do
-            menu_option "$((index + 1))" "${nodes[index]}"
-        done
-        echo
-        if ! read_required_choice ingress_choice "Ingress: " "1-${#nodes[@]}"; then continue; fi
-        case "$ingress_choice" in
-            b|B) return 0 ;;
-            m|M) MAIN_MENU_REQUESTED=1; return 0 ;;
-            i|I) show_info general; continue ;;
-            x|X) exit_tui ;;
-        esac
-        if [[ ! "$ingress_choice" =~ ^[0-9]+$ ]] || ((ingress_choice < 1 || ingress_choice > ${#nodes[@]})); then
-            invalid_choice
-            continue
-        fi
-        ingress_node="${nodes[ingress_choice - 1]}"
-
-        clear_screen
-        menu_heading "Create Cascade VPN"
-        echo
-        printf '%s\n' "Select the egress server (SSH-TUN exitpoint):"
-        for index in "${!nodes[@]}"; do
-            [[ "${nodes[index]}" == "$ingress_node" ]] && continue
-            menu_option "$((index + 1))" "${nodes[index]}"
-        done
-        echo
-        if ! read_required_choice egress_choice "Egress: " "1-${#nodes[@]}"; then continue; fi
-        case "$egress_choice" in
-            b|B) return 0 ;;
-            m|M) MAIN_MENU_REQUESTED=1; return 0 ;;
-            i|I) show_info general; continue ;;
-            x|X) exit_tui ;;
-        esac
-        if [[ ! "$egress_choice" =~ ^[0-9]+$ ]] || ((egress_choice < 1 || egress_choice > ${#nodes[@]})); then
-            invalid_choice
-            continue
-        fi
-        egress_node="${nodes[egress_choice - 1]}"
-        if [[ "$ingress_node" == "$egress_node" ]]; then
-            printf '%s\n' "Ingress and egress must be different servers."
-            wait_action_return
-            continue
-        fi
-
-        clear_screen
-        menu_heading "Create Cascade VPN"
-        echo
-        printf '%s\n' "Enter a deployment ID, for example cascade-1."
-        if ! read_required_choice deployment_id 'Deployment ID: '; then continue; fi
-        case "$deployment_id" in
-            b|B) return 0 ;;
-            m|M) MAIN_MENU_REQUESTED=1; return 0 ;;
-            i|I) show_info general; continue ;;
-            x|X) exit_tui ;;
-        esac
-        if create_cascade_deployment "$deployment_id" "$ingress_node" "$egress_node"; then
-            show_result_screen "Cascade deployment '${deployment_id}' was deployed successfully." \
-                "Ingress: ${ingress_node}" "Egress: ${egress_node}"
-        else
-            show_result_screen "Cascade deployment failed. The Vault was not changed."
-        fi
-        return 0
-    done
-}
-
 open_node_ssh_session() {
     local node="$1" state host user port private_key key_file known_hosts_file ssh_status
     state="$(mktemp "$RUNTIME_TMP_DIR/.ssh-session.XXXXXX")"
@@ -703,7 +588,7 @@ remove_node() {
     return 0
 }
 vpn_servers() {
-    local count items item_count selection kind name node state node_status
+    local items item_count selection kind name node state node_status
     while true; do
         clear_screen
         state="$(mktemp "$RUNTIME_TMP_DIR/.servers.XXXXXX")"

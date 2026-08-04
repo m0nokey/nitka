@@ -71,10 +71,10 @@ def render(state, deployment_id, diagnostics=None):
     )
     print()
     table_rows = []
-    for index, (role, node) in enumerate(rows, 1):
+    for index, (role, node) in enumerate(rows):
         mode = node.get("mode") or ("Xray" if role == "ingress" else "SSH TUN + DNS")
         table_rows.append((
-            f"{index}.",
+            "┌─" if index == 0 else "└─",
             role,
             node.get("host", "N/A"),
             node_status(node, diagnostics),
