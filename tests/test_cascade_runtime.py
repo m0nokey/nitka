@@ -231,6 +231,10 @@ class CascadeRuntimeTests(unittest.TestCase):
             self.assertIn("transport_backhaul_service_name", content)
             self.assertIn("transport_backhaul_container_name", content)
 
+        self.assertIn("transport_backhaul_healthcheck_interval", ingress)
+        self.assertIn("transport_backhaul_startup_timeout", ensure)
+        self.assertIn("transport_backhaul_healthcheck_start_period", egress)
+
     def test_cascade_updater_is_stopped_during_deployment(self):
         ingress = self.read("ansible/roles/cascade_ingress/tasks/main.yml")
         egress = self.read("ansible/roles/cascade_egress/handlers/main.yml")

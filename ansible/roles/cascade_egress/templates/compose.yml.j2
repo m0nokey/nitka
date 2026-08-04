@@ -21,10 +21,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+      interval: {{ transport_backhaul_healthcheck_interval | default('30s') }}
+      timeout: {{ transport_backhaul_healthcheck_timeout | default('5s') }}
+      retries: {{ transport_backhaul_healthcheck_retries | default(3) }}
+      start_period: {{ transport_backhaul_healthcheck_start_period | default('20s') }}
     ports:
       - "{{ transport_backhaul_external_port | default(cascade_ssh_tun_ssh_port) }}:{{ transport_backhaul_internal_port | default(cascade_ssh_tun_container_port) }}"
     networks:

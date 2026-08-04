@@ -18,6 +18,11 @@
     transport_backhaul_proxy_port: "{{ cascade_ingress_clash_port }}"
     transport_backhaul_dns_address: "{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}"
     transport_backhaul_interface: "{{ cascade_ssh_tun_network_interface }}"
+    transport_backhaul_healthcheck_interval: "{{ cascade_ingress_ssh_healthcheck_interval | default('5s') }}"
+    transport_backhaul_healthcheck_timeout: "{{ cascade_ingress_ssh_healthcheck_timeout | default('2s') }}"
+    transport_backhaul_healthcheck_retries: "{{ cascade_ingress_ssh_healthcheck_retries | default(2) }}"
+    transport_backhaul_healthcheck_start_period: "{{ cascade_ingress_ssh_healthcheck_start_period | default('5s') }}"
+    transport_backhaul_startup_timeout: "{{ cascade_ingress_ssh_startup_timeout_seconds | default(180) }}"
     transport_backhaul_image: local/cascade-ssh-tun-client:latest
     transport_backhaul_build_context: ssh_tun_client
   when: ssh_tun_endpoint == 'client'
@@ -33,6 +38,10 @@
     transport_backhaul_container_ipv4: "{{ cascade_ssh_tun_network_container_vpn_ipv4 }}"
     transport_backhaul_container_subnet: "{{ cascade_ssh_tun_network_container_subnet_cidr_ipv4 }}"
     transport_backhaul_container_gateway: "{{ cascade_ssh_tun_network_container_gateway_ipv4 }}"
+    transport_backhaul_healthcheck_interval: 30s
+    transport_backhaul_healthcheck_timeout: 5s
+    transport_backhaul_healthcheck_retries: 3
+    transport_backhaul_healthcheck_start_period: 20s
     transport_backhaul_image: local/cascade-ssh-tun-server:latest
     transport_backhaul_build_context: ssh_tun_server
   when: ssh_tun_endpoint == 'server'

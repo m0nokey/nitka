@@ -21,10 +21,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck"]
-      interval: {{ cascade_ingress_ssh_healthcheck_interval | default('5s') }}
-      timeout: {{ cascade_ingress_ssh_healthcheck_timeout | default('2s') }}
-      retries: {{ cascade_ingress_ssh_healthcheck_retries | default(2) }}
-      start_period: {{ cascade_ingress_ssh_healthcheck_start_period | default('5s') }}
+      interval: {{ transport_backhaul_healthcheck_interval | default(cascade_ingress_ssh_healthcheck_interval | default('5s')) }}
+      timeout: {{ transport_backhaul_healthcheck_timeout | default(cascade_ingress_ssh_healthcheck_timeout | default('2s')) }}
+      retries: {{ transport_backhaul_healthcheck_retries | default(cascade_ingress_ssh_healthcheck_retries | default(2)) }}
+      start_period: {{ transport_backhaul_healthcheck_start_period | default(cascade_ingress_ssh_healthcheck_start_period | default('5s')) }}
     volumes:
       - ./{{ transport_backhaul_remote_dir_name | default('ssh_tun_client') }}:/ssh:ro
     dns:
