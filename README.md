@@ -368,6 +368,9 @@ the remote exit and transport server to a separate egress node.
 
 A Cascade is one logical VPN service made from two VPS roles:
 
+See the detailed [Cascade topology](ansible/roles/topologies/cascade/README.md)
+reference for the complete transport and blocking flow.
+
 ```text
                   Client
                     │
