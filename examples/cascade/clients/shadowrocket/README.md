@@ -1,8 +1,13 @@
-# Shadowrocket client example
+# Cascade Shadowrocket client example
+
+This profile is for the two-node Cascade topology. It is not a standalone
+node profile.
 
 The supported client format is Shadowrocket on iOS and macOS.
 
-The public profile is `shadowrocket.ru.example.conf` at the repository root.
+The public profile is
+[`shadowrocket.ru.example.conf`](shadowrocket.ru.example.conf) in this
+directory.
 It contains placeholders for node addresses and demonstrates the three client
 actions used by the routing model:
 

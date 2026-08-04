@@ -7,25 +7,27 @@ control plane for independently operated Xray VPS nodes.
 
 ```text
   User's computer
-  +----------------------------+
-  | Docker controller          |
-  | nitka + Ansible         |
-  | encrypted local Vault      |
-  +-------------+--------------+
-                |
-                | SSH
-                v
+  ┌────────────────────────────┐
+  │ Docker controller          │
+  │ nitka + Ansible            │
+  │ encrypted local Vault      │
+  └─────────────┬──────────────┘
+                │
+                │ SSH
+                ▼
   VPS node
-  +----------------------------+
-  | Debian + Docker Compose    |
-  | Xray + optional Unbound    |
-  | systemd update services    |
-  +-------------+--------------+
-                |
-                | upstream registries,
-                | packages and DNS lists
-                v
-           External services
+  ┌────────────────────────────┐
+  │ Debian + Docker Compose    │
+  │ Xray + optional Unbound    │
+  │ systemd update services    │
+  └─────────────┬──────────────┘
+                │
+                │ upstream registries,
+                │ packages and DNS lists
+                ▼
+  ┌────────────────────────────┐
+  │ External services          │
+  └────────────────────────────┘
 ```
 
 The main trust boundaries are:

@@ -3,8 +3,8 @@
 Transport adapters are split by their position in the network path:
 
 ```text
-access   client device -> ingress VPS
-backhaul ingress VPS -> egress VPS
+access   client device → ingress VPS
+backhaul ingress VPS → egress VPS
 ```
 
 An adapter owns only its transport-specific endpoint, credentials, runtime,

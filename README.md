@@ -34,7 +34,7 @@ It helps you:
 ```
 
 Public sanitized routing and client examples are documented in
-[EXAMPLES.md](EXAMPLES.md).
+[examples/README.md](examples/README.md).
 
 > ⚠️ **Security Notice:**<br>
 > Always review any script from the internet before running it on your system!
@@ -304,13 +304,13 @@ changes. After deployment, each node continues to operate independently.
 ```text
                          CONTROL PLANE
 
-          +-------------------+
-          | Nitka CLI         |
-          | encrypted Vault   |
-          +---------+---------+
-                    |
+          ┌─────────────────────┐
+          │ Nitka CLI           │
+          │ encrypted Vault     │
+          └─────────┬───────────┘
+                    │
           management SSH / Ansible
-                    v
+                    ▼
           ┌─────────────────────┐
           │         VPNs        │
           └─────────────────────┘
@@ -330,31 +330,31 @@ The original one-node Nitka deployment remains a supported mode. Its basic
 runtime path is:
 
 ```text
-  +-------------------------+       SSH / Ansible       +-------------------------+
-  | User's computer         | ------------------------> | VPS node                |
-  |                         |                           |                         |
-  | nitka in Docker         |                           | Debian + Docker Compose |
-  | encrypted local Vault   |                           |                         |
-  +-------------------------+                           |  +-------------------+  |
-                                                        |  | Xray              |  |
-  +-------------------------+       VPN connection      |  | Vision + REALITY  |  |
-  | VPN client devices      | ------------------------> |  | XHTTP + REALITY   |  |
-  | phone / laptop / tablet |                           |  | packet-up         |  |
-  +-------------------------+                           |  +---------+---------+  |
-                                                        |            |            |
-                                                        |            | DNS        |
-                                                        |            v            |
-                                                        |  +-------------------+  |
-                                                        |  | Unbound           |  |
-                                                        |  | RPZ blocklists    |  |
-                                                        |  | NXDOMAIN          |  |
-                                                        |  +---------+---------+  |
-                                                        +------------|------------+
-                                                                     |
+  ┌─────────────────────────┐       SSH / Ansible       ┌─────────────────────────┐
+  │ User's computer         │ ───────────────────────▶  │ VPS node                │
+  │                         │                           │                         │
+  │ nitka in Docker         │                           │ Debian + Docker Compose │
+  │ encrypted local Vault   │                           │                         │
+  └─────────────────────────┘                           │  ┌───────────────────┐  │
+                                                        │  │ Xray              │  │
+  ┌─────────────────────────┐       VPN connection      │  │ Vision + REALITY  │  │
+  │ VPN client devices      │ ───────────────────────▶  │  │ XHTTP + REALITY   │  │
+  │ phone / laptop / tablet │                           │  │ packet-up         │  │
+  └─────────────────────────┘                           │  └─────────┬─────────┘  │
+                                                        │            │            │
+                                                        │            │ DNS        │
+                                                        │            ▼            │
+                                                        │  ┌───────────────────┐  │
+                                                        │  │ Unbound           │  │
+                                                        │  │ RPZ blocklists    │  │
+                                                        │  │ NXDOMAIN          │  │
+                                                        │  └─────────┬─────────┘  │
+                                                        └────────────┬────────────┘
+                                                                     │
                                                                  DNS-over-TLS
                                                           Cloudflare / AdGuard DNS
-                                                                     |
-                                                                     v
+                                                                     │
+                                                                     ▼
                                                                   Internet
 ```
 
@@ -370,22 +370,22 @@ A Cascade is one logical VPN service made from two VPS roles:
 
 ```text
                   Client
-                    |
-                    v
-    +--------------------------------+
-    | VPS [ingress node]             |   DIRECT by default
-    | local country                  |--------------------> Internet [local exit]
-    | Xray + whitelist routing       |
-    +----------------+---------------+
-                     |
-                     | PROXY whitelist
-                     | SSH TUN transport
-                     v
-    +--------------------------------+
-    | VPS [egress node]              |
-    | remote country                 |--------------------> Internet [remote exit]
-    | SSH TUN server + Unbound DNS   |
-    +----------------+---------------+
+                    │
+                    ▼
+    ┌────────────────────────────────┐
+    │ VPS [ingress node]             │   DIRECT by default
+    │ local country                  │────────────────────▶ Internet [local exit]
+    │ Xray + whitelist routing       │
+    └────────────────┬───────────────┘
+                     │
+                     │ SSH TUN transport
+                     │ 
+                     ▼
+    ┌────────────────────────────────┐
+    │ VPS [egress node]              │   PROXY whitelist
+    │ remote country                 │────────────────────▶ Internet [remote exit]
+    │ SSH TUN server + Unbound DNS   │
+    └────────────────────────────────┘
 ```
 
 The ingress node is the only endpoint exposed to VPN clients. Xray uses
@@ -414,7 +414,7 @@ hardening:
   cascade_ingress  Xray, routing policy, client-side transport endpoint
   cascade_egress   remote DNS, RPZ, server-side transport endpoint
         |
-  transport         client endpoint <-> server endpoint
+  transport         client endpoint ↔ server endpoint
 ```
 
 The current transport is SSH TUN:
@@ -898,8 +898,9 @@ separate key database is created on the VPS.
 │       └── topologies/            # standalone/cascade topology boundaries
 │
 ├── examples/
-│   ├── clients/shadowrocket/     # supported iOS/macOS client format
-│   └── routing/xray/             # public Xray routing example contract
+│   └── cascade/
+│       ├── clients/shadowrocket/ # Cascade client format
+│       └── routing/xray/          # Cascade routing example
 │
 ├── scripts/
 │   Python helpers for encrypted state validation, node rendering,
