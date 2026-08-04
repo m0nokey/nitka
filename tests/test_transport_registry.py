@@ -3,6 +3,7 @@ import unittest
 from scripts.transport_registry import (
     TRANSPORT_SSH_TUN,
     TRANSPORT_XRAY_REALITY,
+    validate_access_transport,
     validate_deployment_transports,
     validate_transport_plan,
 )
@@ -46,6 +47,12 @@ class TransportRegistryTests(unittest.TestCase):
     def test_unimplemented_adapter_cannot_be_selected(self):
         with self.assertRaisesRegex(ValueError, "not implemented"):
             validate_transport_plan("cascade", "naiveproxy", "ssh-tun")
+
+    def test_standalone_access_selection_is_canonicalized(self):
+        self.assertEqual(validate_access_transport("existing-xray"), "xray-reality")
+
+        with self.assertRaisesRegex(ValueError, "not implemented"):
+            validate_access_transport("hysteria2")
 
     def test_deployment_contract_requires_backhaul_for_cascade(self):
         with self.assertRaisesRegex(ValueError, "requires a backhaul"):

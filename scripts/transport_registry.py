@@ -110,6 +110,11 @@ def _select_adapter(name: str, registry: dict[str, TransportAdapter], plane: str
     return adapter
 
 
+def validate_access_transport(name: str) -> str:
+    """Validate a standalone access selection and return its canonical name."""
+    return _select_adapter(name, ACCESS_ADAPTERS, PLANE_ACCESS).name
+
+
 def validate_transport_plan(
     topology: str,
     access_transport: str,

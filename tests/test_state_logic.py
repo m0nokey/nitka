@@ -192,6 +192,19 @@ class StateCliTests(unittest.TestCase):
         state = self.run_cli(state, "remove-all-keys", "node-a")
         self.assertEqual(state["nodes"]["node-a"]["xray"]["access_keys"], [])
 
+    def test_extract_exposes_canonical_access_transport(self):
+        result = subprocess.run(
+            [sys.executable, str(STATE_CLI), "extract", "node-a"],
+            cwd=ROOT_DIR,
+            input=json.dumps(self.fixture_state()),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["xray_access_transport"], "xray-reality")
+
     def test_deployment_state_moves_to_management_port(self):
         state = self.run_cli(self.fixture_state(), "mark-deployed", "node-a")
         node = state["nodes"]["node-a"]

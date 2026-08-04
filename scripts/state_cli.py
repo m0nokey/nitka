@@ -23,6 +23,7 @@ from deployment_logic import (
 )
 from routing_policy import import_routing_policy
 from state_logic import build_port_mapping, generated_port, generated_vpn_ports
+from transport_registry import validate_access_transport
 
 COUNTRIES_FILE = Path(__file__).resolve().parent.parent / "data" / "countries.tsv"
 
@@ -173,8 +174,15 @@ elif opts.action == "extract":
     if len(opts.args) != 1 or opts.args[0] not in nodes:
         raise SystemExit("extract requires NODE")
     node = nodes[opts.args[0]]
+    try:
+        access_transport = validate_access_transport(
+            node.get("access_transport", "xray-reality")
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     output = {
         "xray_state": node["xray"],
+        "xray_access_transport": access_transport,
         "xray_server_name": node["xray"].get("server_name", "github.com"),
         "xray_dns_profile": node["xray"].get("dns_filter_profile", "disabled"),
         "xray_dns_lists": node["xray"].get("dns_filter_lists", []),
@@ -545,6 +553,7 @@ elif opts.action == "add-node":
             source="state_cli",
         ),
         "role": opts.node_role,
+        "access_transport": "xray-reality",
         "ssh_host_public_key": "",
         "ssh_host_fingerprint": "",
         "xray": xray_state,
