@@ -6,6 +6,7 @@
   loop:
     - dns
     - dns/unbound.conf.d
+    - dns/rpz
 
 - name: Render docker compose
   ansible.builtin.template:
@@ -21,6 +22,13 @@
     mode: "0644"
   notify: Restart egress stack
 
+- name: Render local Cascade ad and tracking RPZ
+  ansible.builtin.template:
+    src: dns/cascade-ads-tracking.rpz.j2
+    dest: "{{ cascade_egress_remote_dir }}/dns/rpz/cascade-ads-tracking.rpz"
+    mode: "0644"
+  notify: Restart egress stack
+
 - name: Render unbound dockerignore
   ansible.builtin.copy:
     dest: "{{ cascade_egress_remote_dir }}/dns/.dockerignore"
@@ -28,6 +36,8 @@
     content: |
       *
       !Dockerfile
+      !rpz
+      !rpz/cascade-ads-tracking.rpz
   notify: Restart egress stack
 
 - name: Render unbound config

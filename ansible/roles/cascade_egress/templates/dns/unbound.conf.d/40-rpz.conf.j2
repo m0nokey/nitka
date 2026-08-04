@@ -4,7 +4,9 @@ server:
 {% for source in cascade_egress_unbound_rpz_sources %}
 rpz:
     name: "{{ source.name }}"
+{% if source.url is defined and source.url %}
     url: "{{ source.url }}"
+{% endif %}
     zonefile: "{{ source.zonefile }}"
     rpz-action-override: nxdomain
     rpz-log: no

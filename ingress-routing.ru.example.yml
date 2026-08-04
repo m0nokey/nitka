@@ -1,0 +1,1555 @@
+---
+# Single source of truth for Xray routing.
+#
+# Edit this file, then apply:
+#   bash run.sh --ingress
+#
+# Delete a rule from this file and re-run --ingress: it disappears from the
+# rendered Xray config. There are no hidden user override files.
+#
+# Rule formats accepted by Xray:
+#   - domain:example.com
+#   - full:api.example.com
+#   - keyword:example
+#   - regexp:^.+\\.example\\.com$
+#   - geosite:category-name
+#
+# IP/CIDR formats:
+#   - 203.0.113.10
+#   - 203.0.113.0/24
+
+ingress_clash_tcp_concurrent: true
+
+# PROXY groups: traffic matching these lists exits through egress.
+ingress_xray_reality_proxy_domains_telegram:
+  - geosite:telegram
+  - keyword:telegram
+  - domain:telegram.org
+  - domain:telegram.me
+  - domain:telegram.dog
+  - domain:telegram-cdn.org
+  - domain:tdesktop.com
+  - domain:t.me
+  - domain:telegra.ph
+
+ingress_xray_reality_proxy_ips_telegram:
+  - 149.154.160.0/20
+  - 91.108.4.0/22
+  - 91.108.8.0/22
+  - 91.108.12.0/22
+  - 91.108.16.0/22
+  - 91.108.20.0/22
+  - 91.108.36.0/23
+  - 91.108.38.0/23
+  - 91.108.56.0/22
+  - 2001:67c:4e8::/48
+  - 2001:b28:f23d::/48
+  - 2001:b28:f23f::/48
+
+ingress_xray_reality_proxy_domains_messengers:
+  # WhatsApp
+  - keyword:whatsapp
+  - domain:whatsapp.com
+  - domain:whatsapp.net
+  - domain:web.whatsapp.com
+  - domain:wa.me
+  - domain:mmg.whatsapp.net
+  - domain:static.whatsapp.net
+
+  # LINE
+  - keyword:line
+  - domain:line.me
+  - domain:line.naver.jp
+  - domain:line-apps.com
+  - domain:line-scdn.net
+  - domain:line-cdn.net
+  - domain:lin.ee
+
+  # Session messenger
+  - keyword:session
+  - domain:getsession.org
+  - domain:session.foundation
+  - domain:session.community
+  - domain:oxen.io
+  - domain:lokinet.org
+
+  # Matrix / Element
+  - keyword:matrix
+  - keyword:element
+  - domain:matrix.org
+  - domain:element.io
+  - domain:element-web.io
+  - domain:vector.im
+  - domain:riot.im
+  - domain:modular.im
+
+ingress_xray_reality_proxy_domains_apple:
+  # Apple realtime messaging/calling and account/iCloud signaling.
+  # App Store/download/update hosts are forced DIRECT below before this PROXY rule.
+  - domain:apple.com
+  - keyword:imessage
+  - keyword:facetime
+  - domain:icloud.com
+  - domain:icloud-content.com
+  - domain:apple-cloudkit.com
+  - domain:apple-livephotoskit.com
+  - domain:apzones.com
+  - domain:account.apple.com
+  - domain:appleid.apple.com
+  - domain:appleid.cdn-apple.com
+  - domain:idmsa.apple.com
+  - domain:auth.apple.com
+  - domain:gsa.apple.com
+  - domain:identity.apple.com
+  - domain:push.apple.com
+  - domain:courier.push.apple.com
+
+ingress_xray_reality_proxy_domains_shazam:
+  - domain:shazam.com
+
+ingress_xray_reality_proxy_ips_apple: []
+# Apple IP ranges are intentionally not proxied: they are too broad and can
+# slow App Store, iCloud downloads, updates, and CDN traffic.
+#  - 17.249.0.0/16
+#  - 17.252.0.0/16
+#  - 17.57.144.0/22
+#  - 17.188.128.0/18
+#  - 17.188.20.0/23
+#  - 2620:149:a44::/48
+#  - 2403:300:a42::/48
+#  - 2403:300:a51::/48
+#  - 2a01:b740:a42::/48
+
+ingress_xray_reality_proxy_domains_anthropic:
+  - keyword:anthropic
+  - domain:claude.ai
+  - domain:console.anthropic.com
+  - domain:api.anthropic.com
+
+ingress_xray_reality_proxy_ips_anthropic:
+  - 160.79.104.0/23
+  - 2607:6bc0::/48
+
+ingress_xray_reality_proxy_domains_google:
+  - keyword:google
+  - domain:ggpht.com
+  - domain:gmail.com
+  - domain:gemini.google.com
+  - domain:notebooklm.google.com
+  - domain:ai.google.dev
+
+ingress_xray_reality_proxy_domains_mail:
+  # iCloud Mail stays direct by default. Uncomment only if mail specifically
+  # must exit through egress.
+  # - domain:icloud.com
+  # - domain:me.com
+  # - domain:mac.com
+  # - domain:mail.me.com
+  # - domain:imap.mail.me.com
+  # - domain:smtp.mail.me.com
+  # - keyword:icloud
+
+  # Gmail / Google Mail
+  - domain:gmail.com
+  - domain:googlemail.com
+  - domain:mail.google.com
+  - domain:imap.gmail.com
+  - domain:smtp.gmail.com
+  - domain:pop.gmail.com
+  - domain:smtp-relay.gmail.com
+
+ingress_xray_reality_proxy_domains_jobs:
+  # Major professional networks and job boards
+  - domain:jobbers.io
+  - domain:linkedin.com
+  - domain:licdn.com
+  - domain:indeed.com
+  - domain:glassdoor.com
+  - domain:monster.com
+  - domain:dice.com
+  - domain:wellfound.com
+  - domain:angel.co
+  - domain:otta.com
+  - domain:cord.co
+  - domain:hired.com
+  - domain:levels.fyi
+
+  # Remote-first job boards
+  - domain:remoteok.com
+  - domain:weworkremotely.com
+  - domain:flexjobs.com
+  - domain:remotive.com
+  - domain:remote.co
+  - domain:workingnomads.com
+  - domain:justremote.co
+  - domain:jobspresso.co
+  - domain:remote.com
+  - domain:dynamitejobs.com
+  - domain:powertofly.com
+  - domain:workew.com
+  - domain:skipthedrive.com
+  - domain:authenticjobs.com
+
+  # Freelance and talent marketplaces
+  - domain:upwork.com
+  - domain:fiverr.com
+  - domain:toptal.com
+  - domain:freelancer.com
+  - domain:guru.com
+  - domain:peopleperhour.com
+  - domain:contra.com
+  - domain:arc.dev
+  - domain:gun.io
+  - domain:codeable.io
+  - domain:lemon.io
+  - domain:a.team
+  - domain:braintrust.com
+  - domain:clouddevs.com
+
+  # Tech/startup hiring and AI-agent adjacent hiring
+  - domain:ycombinator.com
+  - domain:workatastartup.com
+  - domain:startup.jobs
+  - domain:otta.com
+  - domain:wellfound.com
+  - domain:triplebyte.com
+  - domain:usebraintrust.com
+  - domain:mercor.com
+  - domain:micro1.ai
+  - domain:outlier.ai
+  - domain:remotasks.com
+  - domain:scale.com
+  - domain:appen.com
+  - domain:toloka.ai
+  - domain:dataannotation.tech
+  - domain:alignerr.com
+
+ingress_xray_reality_proxy_domains_discord:
+  - keyword:discord
+  - domain:discord.com
+  - domain:discord.gg
+  - domain:discordapp.com
+  - domain:discordapp.net
+  - domain:discordcdn.com
+  - domain:discord.media
+  - domain:discord.gift
+  - domain:discord.new
+  - domain:dis.gd
+  - domain:discordstatus.com
+  - domain:gateway.discord.gg
+  - domain:cdn.discordapp.com
+  - domain:media.discordapp.net
+  - domain:images-ext-1.discordapp.net
+  - domain:images-ext-2.discordapp.net
+  - domain:dl.discordapp.net
+  - domain:streamkit.discord.com
+  - domain:canary.discord.com
+  - domain:ptb.discord.com
+  - domain:status.discord.com
+  - domain:discord-activities.com
+
+ingress_xray_reality_proxy_domains_x:
+  # X / Twitter and media CDN.
+  - keyword:twitter
+  - domain:x.com
+  - domain:www.x.com
+  - domain:api.x.com
+  - domain:mobile.x.com
+  - domain:twitter.com
+  - domain:www.twitter.com
+  - domain:mobile.twitter.com
+  - domain:api.twitter.com
+  - domain:abs.twimg.com
+  - domain:pbs.twimg.com
+  - domain:video.twimg.com
+  - domain:ton.twimg.com
+  - domain:twimg.com
+  - domain:t.co
+  - domain:tweetdeck.twitter.com
+  - domain:tweetdeck.com
+
+ingress_xray_reality_proxy_domains_blogosphere:
+  # Useful blog platforms, independent communities, and social networks.
+  - domain:medium.com
+  - domain:substack.com
+  - domain:ghost.io
+  - domain:dev.to
+  - domain:hashnode.com
+  - domain:towardsdatascience.com
+  - domain:lesswrong.com
+  - domain:alignmentforum.org
+  - domain:lobste.rs
+  - domain:news.ycombinator.com
+  - domain:indiehackers.com
+  - domain:producthunt.com
+  - domain:bsky.app
+  - domain:bsky.social
+  - domain:bsky.network
+  - domain:atproto.com
+  - domain:mastodon.social
+  - domain:joinmastodon.org
+  - domain:threads.net
+
+  # Instagram core. Facebook/Meta trackers remain blocked in BLOCK rules.
+  - domain:instagram.com
+  - domain:www.instagram.com
+  - domain:i.instagram.com
+  - domain:api.instagram.com
+  - domain:graph.instagram.com
+  - domain:cdninstagram.com
+  - domain:scontent.cdninstagram.com
+  - domain:ig.me
+
+ingress_xray_reality_proxy_domains_openai:
+  - keyword:openai
+  - domain:chatgpt.com
+  - domain:api.openai.com
+  - domain:platform.openai.com
+  - domain:oaistatic.com
+  - domain:oaiusercontent.com
+
+ingress_xray_reality_proxy_domains_cloud_providers:
+  - geosite:cloudflare
+  - geosite:amazon
+  - geosite:google
+  - geosite:digitalocean
+  - geosite:hetzner
+
+ingress_xray_reality_proxy_domains_cloud_extra:
+  # AWS / Amazon
+  - domain:amazonaws.com
+  - domain:aws.amazon.com
+  - domain:cloudfront.net
+  - domain:awsstatic.com
+  - domain:elasticbeanstalk.com
+  - domain:execute-api.com
+
+  # Google Cloud / Google APIs
+  - domain:googleapis.com
+  - domain:googleusercontent.com
+  - domain:gstatic.com
+  - domain:gcr.io
+  - domain:pkg.dev
+  - domain:run.app
+  - domain:appspot.com
+  - domain:firebaseapp.com
+  - domain:firebaseio.com
+
+  # Cloudflare
+  - domain:cloudflare.com
+  - domain:cloudflare-dns.com
+  - domain:cloudflareinsights.com
+  - domain:workers.dev
+  - domain:pages.dev
+  - domain:trycloudflare.com
+  - domain:cloudflareclient.com
+
+  # DigitalOcean
+  - domain:digitalocean.com
+  - domain:digitaloceanspaces.com
+  - domain:do.co
+
+  # Hetzner
+  - domain:hetzner.com
+  - domain:hetzner.cloud
+  - domain:your-server.de
+
+  # Developer / API infra
+  - domain:github.com
+  - domain:githubusercontent.com
+  - domain:githubassets.com
+  - domain:github.io
+  - domain:gitlab.com
+  - domain:codeberg.org
+  - domain:gitea.com
+  - domain:sr.ht
+  - domain:sourcehut.org
+  - domain:bitbucket.org
+  - domain:debian.org
+  - domain:deb.debian.org
+  - domain:security.debian.org
+  - domain:debian.map.fastlydns.net
+  - domain:docker.com
+  - domain:docker.io
+  - domain:registry-1.docker.io
+  - domain:ghcr.io
+  - domain:pypi.org
+  - domain:files.pythonhosted.org
+  - domain:pythonhosted.org
+  - domain:npmjs.com
+  - domain:npmjs.org
+  - domain:jsdelivr.net
+  - domain:unpkg.com
+  - domain:cdnjs.cloudflare.com
+
+  # Useful tech/community sites.
+  - domain:hackaday.com
+  - domain:fxtwitter.com
+
+  # Captcha / auth / anti-bot
+  - domain:hcaptcha.com
+  - domain:recaptcha.net
+  - domain:gstatic.com
+  - domain:auth0.com
+  - domain:okta.com
+
+  # AI / models / APIs
+  - domain:perplexity.ai
+  - domain:mistral.ai
+  - domain:api.mistral.ai
+  - domain:groq.com
+  - domain:console.groq.com
+  - domain:api.groq.com
+  - domain:poe.com
+  - domain:quora.com
+
+ingress_xray_reality_proxy_domains_hashicorp:
+  - keyword:hashicorp
+  - keyword:terraform
+  - keyword:vault
+  - keyword:consul
+  - keyword:nomad
+  - keyword:boundary
+  - domain:hashicorp.com
+  - domain:www.hashicorp.com
+  - domain:developer.hashicorp.com
+  - domain:support.hashicorp.com
+  - domain:portal.hashicorp.com
+  - domain:releases.hashicorp.com
+  - domain:terraform.io
+  - domain:www.terraform.io
+  - domain:registry.terraform.io
+  - domain:app.terraform.io
+  - domain:vaultproject.io
+  - domain:www.vaultproject.io
+  - domain:packer.io
+  - domain:www.packer.io
+  - domain:consul.io
+  - domain:www.consul.io
+  - domain:nomadproject.io
+  - domain:www.nomadproject.io
+  - domain:boundaryproject.io
+  - domain:www.boundaryproject.io
+  - domain:waypointproject.io
+  - domain:www.waypointproject.io
+
+ingress_xray_reality_proxy_domains_ai_tools:
+  - keyword:openai
+  - domain:chatgpt.com
+  - domain:api.openai.com
+  - domain:platform.openai.com
+  - domain:oaistatic.com
+  - domain:oaiusercontent.com
+  - keyword:anthropic
+  - domain:claude.ai
+  - domain:console.anthropic.com
+  - domain:api.anthropic.com
+  - keyword:google
+  - domain:gemini.google.com
+  - domain:notebooklm.google.com
+  - domain:ai.google.dev
+  - domain:workspace.google.com
+  - domain:copilot.microsoft.com
+  - domain:huggingface.co
+  - domain:huggingfaceusercontent.com
+  - domain:replicate.com
+  - domain:runwayml.com
+  - domain:stability.ai
+  - domain:openrouter.ai
+  - domain:together.ai
+  - domain:deepseek.com
+  - domain:deepseek.ai
+  - domain:perplexity.ai
+  - domain:mistral.ai
+  - domain:api.mistral.ai
+  - domain:groq.com
+  - domain:console.groq.com
+  - domain:api.groq.com
+  - domain:poe.com
+  - domain:quora.com
+
+ingress_xray_reality_proxy_domains_trackers:
+  - domain:nnmclub.to
+  - domain:nnmstatic.win
+  - domain:rutracker.org
+  - domain:rutracker.net
+  - domain:rutracker.cc
+  - domain:ruttracker.org
+  - domain:ruttracker.net
+  - domain:www.nnmclub.to
+  - domain:www.rutracker.org
+  - domain:www.rutracker.net
+  - domain:static.rutracker.cc
+  - domain:www.ruttracker.org
+  - domain:www.ruttracker.net
+  - domain:ww1.ruttracker.org
+
+ingress_xray_reality_proxy_domains_redgifs:
+  - domain:redgifs.com
+  - domain:www.redgifs.com
+  - domain:api.redgifs.com
+  - domain:media.redgifs.com
+  - domain:userpic.redgifs.com
+
+ingress_xray_reality_proxy_domains_adult:
+  - domain:elitebabes.com
+  - domain:www.elitebabes.com
+
+ingress_xray_reality_proxy_domains_yahoo_finance:
+  - domain:finance.yahoo.com
+  - domain:query1.finance.yahoo.com
+  - domain:query2.finance.yahoo.com
+  - domain:fc.yahoo.com
+
+ingress_xray_reality_proxy_domains_weather:
+  - domain:wttr.in
+
+ingress_xray_reality_proxy_domains_music:
+  - domain:soundcloud.com
+  - domain:sndcdn.com
+  - domain:mixcloud.com
+
+ingress_xray_reality_proxy_domains_crypto:
+  # Official wallets, exchanges, and market data.
+  - domain:bitcoin.org
+  - domain:bitcoincore.org
+  - domain:electrum.org
+  - domain:download.electrum.org
+  - domain:getmonero.org
+  - domain:www.getmonero.org
+  - domain:web.getmonero.org
+  - domain:downloads.getmonero.org
+  - domain:monero.org
+  - domain:metamask.io
+  - domain:portfolio.metamask.io
+  - domain:coinbase.com
+  - domain:api.coinbase.com
+  - domain:assets.coinbase.com
+  - domain:coingecko.com
+  - domain:api.coingecko.com
+  - domain:static.coingecko.com
+
+ingress_xray_reality_proxy_domains_reviews:
+  # Review and reputation platforms.
+  # Public review sites are useful for OSINT, but their trust quality varies.
+  - domain:trustpilot.com
+  - domain:www.trustpilot.com
+  - domain:otzovik.com
+  - domain:www.otzovik.com
+  - domain:bbb.org
+  - domain:www.bbb.org
+  - domain:g2.com
+  - domain:www.g2.com
+  - domain:capterra.com
+  - domain:www.capterra.com
+  - domain:getapp.com
+  - domain:www.getapp.com
+  - domain:trustradius.com
+  - domain:www.trustradius.com
+  - domain:sitejabber.com
+  - domain:www.sitejabber.com
+  - domain:consumeraffairs.com
+  - domain:www.consumeraffairs.com
+  - domain:reviews.io
+  - domain:www.reviews.io
+
+ingress_xray_reality_proxy_domains_publications:
+  # Useful science, research, data science, and technical publications.
+  - domain:psypost.org
+  - domain:quantamagazine.org
+  - domain:knowablemagazine.org
+  - domain:undark.org
+  - domain:scientificamerican.com
+  - domain:sciencenews.org
+  - domain:livescience.com
+  - domain:phys.org
+  - domain:technologyreview.com
+  - domain:arstechnica.com
+  - domain:wired.com
+
+  # Research journals and paper indexes.
+  - domain:arxiv.org
+  - domain:openreview.net
+  - domain:paperswithcode.com
+  - domain:nature.com
+  - domain:science.org
+  - domain:cell.com
+  - domain:pnas.org
+  - domain:plos.org
+  - domain:pubmed.ncbi.nlm.nih.gov
+  - domain:ncbi.nlm.nih.gov
+
+  # ML / AI / CS conferences and libraries.
+  - domain:jmlr.org
+  - domain:proceedings.neurips.cc
+  - domain:neurips.cc
+  - domain:icml.cc
+  - domain:iclr.cc
+  - domain:aclanthology.org
+  - domain:semanticscholar.org
+  - domain:connectedpapers.com
+  - domain:dl.acm.org
+  - domain:acm.org
+  - domain:ieeexplore.ieee.org
+  - domain:ieee.org
+  - domain:usenix.org
+
+ingress_xray_reality_proxy_domains_work_tools:
+  # Adobe / Creative Cloud / Acrobat / Fonts / Stock
+  - keyword:adobe
+  - domain:adobe.com
+  - domain:adobe.io
+  - domain:adobelogin.com
+  - domain:adobecc.com
+  - domain:adobeccstatic.com
+  - domain:adobecreativecloud.com
+  - domain:adobeaemcloud.com
+  - domain:adobejanus.com
+  - domain:adobesc.com
+  - domain:adobesign.com
+  - domain:acrobat.com
+  - domain:behance.net
+  - domain:typekit.com
+  - domain:typekit.net
+  - domain:adobedtm.com
+  - domain:adobeexchange.com
+  - domain:adobe-addons.com
+  - domain:photoshop.com
+  - domain:lightroom.adobe.com
+  - domain:substance3d.com
+  - domain:frame.io
+
+  # Figma / FigJam
+  - keyword:figma
+  - domain:figma.com
+  - domain:figma.site
+  - domain:figma.app
+  - domain:makeproxy-c.figma.site
+  - domain:makeproxy-m.figma.site
+  - domain:figmausercontent.com
+  - domain:figma-alpha-api.s3.us-west-2.amazonaws.com
+  - domain:esm.sh
+  - domain:jsdelivr.net
+  - domain:getzola.org
+
+  # Autodesk / AutoCAD / Fusion / Revit / BIM / Construction Cloud
+  - keyword:autodesk
+  - domain:autodesk.com
+  - domain:autodesk.eu
+  - domain:autodesk360.com
+  - domain:autocad.com
+  - domain:revit.com
+  - domain:fusion360.autodesk.com
+  - domain:acc.autodesk.com
+  - domain:bim360.autodesk.com
+  - domain:construction.autodesk.com
+  - domain:autodeskidentity.com
+  - domain:autodesk-prod.com
+  - domain:autodesk-prod.com.edgekey.net
+  - domain:autodesk-prod.com.edgesuite.net
+  - domain:autodesk-prod.com.akadns.net
+
+  # Microsoft 365 / Office / OneDrive / Teams
+  - keyword:microsoft
+  - keyword:office365
+  - keyword:onedrive
+  - keyword:sharepoint
+  - domain:microsoft.com
+  - domain:microsoftonline.com
+  - domain:office.com
+  - domain:office.net
+  - domain:office365.com
+  - domain:live.com
+  - domain:outlook.com
+  - domain:sharepoint.com
+  - domain:onedrive.com
+  - domain:onedrive.live.com
+  - domain:teams.microsoft.com
+  - domain:skype.com
+  - domain:msftauth.net
+  - domain:msauth.net
+  - domain:msidentity.com
+  - domain:msecnd.net
+  - domain:azureedge.net
+
+  # Google Workspace / Drive / Docs / Meet
+  - domain:workspace.google.com
+  - domain:docs.google.com
+  - domain:drive.google.com
+  - domain:meet.google.com
+  - domain:calendar.google.com
+  - domain:accounts.google.com
+  - domain:googleusercontent.com
+  - domain:googleapis.com
+  - domain:gstatic.com
+
+  # Notion / Miro / Linear / Jira / Confluence
+  - domain:identity.notion.com
+  - domain:notion.com
+  - domain:notion.so
+  - domain:notion.site
+  - domain:notion-static.com
+  - domain:splunkcloud.com
+  - domain:miro.com
+  - domain:mirostatic.com
+  - domain:linear.app
+  - domain:atlassian.com
+  - domain:atlassian.net
+  - domain:jira.com
+  - domain:confluence.atlassian.com
+  - domain:trello.com
+  - domain:aspi.org.au
+
+  # Slack / Zoom / video calls / collaboration
+  - domain:slack.com
+  - domain:slack-edge.com
+  - domain:slack-imgs.com
+  - domain:zoom.us
+  - domain:zoom.com
+  - domain:zoomgov.com
+  - domain:loom.com
+  - domain:calendly.com
+
+  # Design / media / stock / prototyping
+  - domain:canva.com
+  - domain:canva.cn
+  - domain:framer.com
+  - domain:webflow.com
+  - domain:dribbble.com
+  - domain:sketch.com
+  - domain:invisionapp.com
+  - domain:unsplash.com
+  - domain:pexels.com
+  - domain:shutterstock.com
+  - domain:istockphoto.com
+  - domain:gettyimages.com
+
+  # 3D / CAD / game / assets
+  - domain:unity.com
+  - domain:unity3d.com
+  - domain:unrealengine.com
+  - domain:epicgames.com
+  - domain:sketchup.com
+  - domain:trimble.com
+  - domain:blender.org
+  - domain:turbosquid.com
+  - domain:sketchfab.com
+  - domain:artstation.com
+
+  # Translation / language tools
+  - keyword:deepl
+  - domain:deepl.com
+  - domain:www.deepl.com
+  - domain:api-free.deepl.com
+  - domain:www2.deepl.com
+  - domain:dict.deepl.com
+
+ingress_xray_reality_proxy_ips_work_tools: []
+
+# Aggregated lists used by the template
+ingress_xray_reality_proxy_domains: >-
+  {{
+    ingress_xray_reality_proxy_domains_telegram
+    + ingress_xray_reality_proxy_domains_messengers
+    + ingress_xray_reality_proxy_domains_apple
+    + ingress_xray_reality_proxy_domains_shazam
+    + ingress_xray_reality_proxy_domains_anthropic
+    + ingress_xray_reality_proxy_domains_google
+    + ingress_xray_reality_proxy_domains_mail
+    + ingress_xray_reality_proxy_domains_jobs
+    + ingress_xray_reality_proxy_domains_discord
+    + ingress_xray_reality_proxy_domains_x
+    + ingress_xray_reality_proxy_domains_blogosphere
+    + ingress_xray_reality_proxy_domains_yahoo_finance
+    + ingress_xray_reality_proxy_domains_weather
+    + ingress_xray_reality_proxy_domains_cloud_providers
+    + ingress_xray_reality_proxy_domains_cloud_extra
+    + ingress_xray_reality_proxy_domains_hashicorp
+    + ingress_xray_reality_proxy_domains_redgifs
+    + ingress_xray_reality_proxy_domains_adult
+    + ingress_xray_reality_proxy_domains_music
+    + ingress_xray_reality_proxy_domains_crypto
+    + ingress_xray_reality_proxy_domains_reviews
+    + ingress_xray_reality_proxy_domains_publications
+    + ingress_xray_reality_proxy_domains_work_tools
+    + ingress_xray_reality_proxy_domains_ai_tools
+    + ingress_xray_reality_proxy_domains_trackers
+  }}
+
+ingress_xray_reality_proxy_ips: >-
+  {{
+    ingress_xray_reality_proxy_ips_telegram
+    + ingress_xray_reality_proxy_ips_apple
+    + ingress_xray_reality_proxy_ips_anthropic
+  }}
+
+# DIRECT: traffic matching these lists leaves from ingress directly.
+ingress_xray_reality_direct_domains:
+  # External IP check endpoints must leave directly from ingress.
+  - domain:api.ipify.org
+  - domain:ifconfig.me
+  - domain:icanhazip.com
+  - domain:checkip.amazonaws.com
+  - domain:ipinfo.io
+  - domain:ident.me
+  - domain:cloudflare.com
+  - domain:www.cloudflare.com
+  # Apple app install/download/update paths stay direct for speed.
+  # These rules are evaluated before the broader Apple PROXY group.
+  - domain:itunes.apple.com
+  - domain:itunes.com
+  - domain:apps.apple.com
+  - domain:mzstatic.com
+  - domain:aaplimg.com
+  - domain:ppq.apple.com
+  - domain:appldnld.apple.com
+  - domain:appldnld.apple.com.edgesuite.net
+  - domain:mesu.apple.com
+  - domain:gdmf.apple.com
+  - domain:gdmf-ados.apple.com
+  - domain:gg.apple.com
+  - domain:gs.apple.com
+  - domain:ig.apple.com
+  - domain:oscdn.apple.com
+  - domain:osrecovery.apple.com
+  - domain:skl.apple.com
+  - domain:swcdn.apple.com
+  - domain:swdist.apple.com
+  - domain:swdownload.apple.com
+  - domain:swscan.apple.com
+  - domain:updates.cdn-apple.com
+  - domain:updates-http.cdn-apple.com
+  - domain:xp.apple.com
+  - domain:gsra.apple.com
+  - domain:wkms-public.apple.com
+  # iCloud Private Relay. Keep direct to avoid proxy-over-proxy during Apple flows.
+  # Yandex Mail direct: IMAPS 993, SMTPS 465, SMTP STARTTLS 587, IMAP STARTTLS 143.
+  - domain:imap.yandex.ru
+  - domain:smtp.yandex.ru
+  # VK itself stays direct; ad subdomains remain blocked separately.
+  - domain:vk.com
+  - domain:vk.ru
+
+  - keyword:reddit
+  - domain:reddit.com
+  - domain:redd.it
+  - domain:redditmedia.com
+  - domain:redditstatic.com
+  - domain:redditinc.com
+  - keyword:youtube
+  - keyword:googlevideo
+  - keyword:ytimg
+  - keyword:youtubei
+  - domain:youtube.com
+  - domain:youtu.be
+  - domain:music.youtube.com
+  - domain:studio.youtube.com
+  - domain:consent.youtube.com
+
+ingress_xray_xhttp_direct_domains:
+  # External IP check endpoints must leave directly from ingress.
+  - domain:api.ipify.org
+  - domain:ifconfig.me
+  - domain:icanhazip.com
+  - domain:checkip.amazonaws.com
+  - domain:ipinfo.io
+  - domain:ident.me
+  - domain:cloudflare.com
+  - domain:www.cloudflare.com
+  # Apple app install/download/update paths stay direct for speed.
+  # These rules are evaluated before the broader Apple PROXY group.
+  - domain:itunes.apple.com
+  - domain:itunes.com
+  - domain:apps.apple.com
+  - domain:mzstatic.com
+  - domain:aaplimg.com
+  - domain:ppq.apple.com
+  - domain:appldnld.apple.com
+  - domain:appldnld.apple.com.edgesuite.net
+  - domain:mesu.apple.com
+  - domain:gdmf.apple.com
+  - domain:gdmf-ados.apple.com
+  - domain:gg.apple.com
+  - domain:gs.apple.com
+  - domain:ig.apple.com
+  - domain:oscdn.apple.com
+  - domain:osrecovery.apple.com
+  - domain:skl.apple.com
+  - domain:swcdn.apple.com
+  - domain:swdist.apple.com
+  - domain:swdownload.apple.com
+  - domain:swscan.apple.com
+  - domain:updates.cdn-apple.com
+  - domain:updates-http.cdn-apple.com
+  - domain:xp.apple.com
+  - domain:gsra.apple.com
+  - domain:wkms-public.apple.com
+  # iCloud Private Relay. Keep direct to avoid proxy-over-proxy during Apple flows.
+  # Yandex Mail direct: IMAPS 993, SMTPS 465, SMTP STARTTLS 587, IMAP STARTTLS 143.
+  - domain:imap.yandex.ru
+  - domain:smtp.yandex.ru
+  # VK itself stays direct; ad subdomains remain blocked separately.
+  - domain:vk.com
+  - domain:vk.ru
+
+  - keyword:reddit
+  - domain:reddit.com
+  - domain:redd.it
+  - domain:redditmedia.com
+  - domain:redditstatic.com
+  - domain:redditinc.com
+  - keyword:youtube
+  - keyword:googlevideo
+  - keyword:ytimg
+  - keyword:youtubei
+  - domain:youtube.com
+  - domain:youtu.be
+  - domain:music.youtube.com
+  - domain:studio.youtube.com
+  - domain:consent.youtube.com
+
+ingress_xray_xhttp_direct_ips: []
+
+ingress_xray_dns_direct_domains: >-
+  {{
+    ingress_xray_reality_direct_domains
+    + ingress_xray_xhttp_direct_domains
+  }}
+
+ingress_xray_dns_direct_servers:
+  - address: https://common.dot.dns.yandex.net/dns-query
+
+# BLOCK: traffic matching these lists is rejected before direct/proxy rules.
+ingress_xray_block_ips: []
+ingress_xray_block_domains:
+  - geosite:category-ads-all
+  # Encrypted DNS bypass. DoT/DoQ port 853 is blocked in Xray template;
+  # known DoH endpoints are blocked here by hostname without breaking QUIC.
+  - domain:dns.google
+  - domain:cloudflare-dns.com
+  - domain:mozilla.cloudflare-dns.com
+  - domain:security.cloudflare-dns.com
+  - domain:dns.quad9.net
+  - domain:dns.nextdns.io
+  - domain:doh.opendns.com
+  - domain:doh.cleanbrowsing.org
+  - domain:dns.adguard-dns.com
+  - domain:unfiltered.adguard-dns.com
+  - domain:family.adguard-dns.com
+  # Error/performance telemetry.
+  - domain:sentry.io
+  - domain:sentry-cdn.com
+  # Spotify telemetry. Do not block spclient*; Spotify uses it for core app flows.
+  - domain:crashdump.spotify.com
+  - domain:metrics.spotify.com
+  - domain:pixel.spotify.com
+  - domain:adeventtracker.spotify.com
+  - "full:an.yandex.ru"
+  - "full:yabs.yandex.ru"
+  - "full:bs.yandex.ru"
+  - "full:awaps.yandex.ru"
+  - "full:mc.yandex.ru"
+  - "keyword:mc.yandex"
+  - "full:clck.yandex.ru"
+  - "full:adsdk.yandex.ru"
+  - "full:mobile.yandexadexchange.net"
+  - "domain:yandexadexchange.net"
+  - "full:ad.mail.ru"
+  - "full:top-fwz1.mail.ru"
+  - "full:rs.mail.ru"
+  - "domain:ads.vk.com"
+  - "domain:target.my.com"
+  - "domain:mytarget.ru"
+  - "full:mpx.rambler.ru"
+  - "full:counter.rambler.ru"
+  - "regexp:^img[0-9]+\\.rambler\\.ru$"
+  - "full:profile.ad-tech.ru"
+  - "domain:ad-tech.ru"
+  - "keyword:ad-tech"
+  - "domain:adfox.ru"
+  - "domain:adriver.ru"
+  - "domain:mradx.net"
+  - "domain:betweendigital.com"
+  - "domain:betweenexchange.com"
+  - "domain:otm-r.com"
+  - "domain:getintent.com"
+  - "domain:soloway.ru"
+  - "domain:kadam.net"
+  - "domain:marketgid.com"
+  - "domain:directadvert.ru"
+  - "domain:videonow.ru"
+  - "domain:videoroll.net"
+  - "domain:relap.io"
+  - "domain:smi2.ru"
+  - "domain:lentainform.com"
+  - "domain:mixadvert.com"
+  - "domain:teasernet.com"
+  - "domain:bodyclick.net"
+  - "domain:actionpay.ru"
+  - "domain:cityads.com"
+  - "domain:advertur.ru"
+  - "domain:advmaker.ru"
+  - "domain:rotaban.ru"
+  - "domain:redtram.com"
+  - "domain:recreativ.ru"
+  - "domain:trafmag.com"
+  - "domain:visitweb.com"
+  - "domain:tizerbox.ru"
+  - "domain:tns-counter.ru"
+  - "full:www.tns-counter.ru"
+  - "keyword:tns-counter"
+  - "domain:yadro.ru"
+  - "domain:openstat.net"
+  - "domain:spylog.com"
+  - "domain:liveinternet.ru"
+  - "domain:hotlog.ru"
+  - "domain:mailcounter.ru"
+  - "domain:top.mail.ru"
+  - domain:mpx.rambler.ru
+  - domain:counter.rambler.ru
+  - domain:img01.rambler.ru
+  - domain:img02.rambler.ru
+  - domain:img03.rambler.ru
+  - domain:img04.rambler.ru
+  - domain:img05.rambler.ru
+  - domain:img06.rambler.ru
+  - domain:img07.rambler.ru
+  - domain:img08.rambler.ru
+  - domain:img09.rambler.ru
+  - domain:img10.rambler.ru
+  - domain:ad.mail.ru
+  - domain:top-fwz1.mail.ru
+  - domain:rs.mail.ru
+  - domain:r.mradx.net
+  - domain:ads.betweendigital.com
+  - domain:ad.adriver.ru
+  - domain:ads.adfox.ru
+  - domain:banners.adfox.ru
+  - domain:mc.yandex.ru
+  - domain:clck.yandex.ru
+  - domain:googleads.g.doubleclick.net
+  - domain:pagead2.googlesyndication.com
+  - domain:tpc.googlesyndication.com
+  - domain:securepubads.g.doubleclick.net
+  - domain:static.doubleclick.net
+  - domain:adservice.google.com
+  - domain:adservice.google.ru
+  - domain:partner.googleadservices.com
+  - domain:googleadservices.com
+  - domain:googlesyndication.com
+  - domain:m.doubleclick.net
+  - domain:doubleclick.net
+  - domain:metrika.yandex.ru
+  - domain:mc.webvisor.org
+  - domain:webvisor.org
+  - domain:appmetrica.yandex.ru
+  - domain:appmetrica.io
+  - domain:yandexmetrica.com
+  - domain:ads6.adfox.ru
+  - domain:ads.adfox.ru
+  - domain:ads.vk.com
+  - domain:vk-ads.com
+  - domain:ads.mail.ru
+  - domain:adskeeper.co.uk
+  - domain:mgid.com
+  - domain:mgid.ru
+  - domain:criteo.com
+  - domain:criteo.net
+  - domain:scorecardresearch.com
+  - domain:adnxs.com
+  - domain:rubiconproject.com
+  - domain:pubmatic.com
+  - domain:openx.net
+  - domain:taboola.com
+  - domain:outbrain.com
+  - domain:hotjar.com
+  - domain:googletagmanager.com
+  - domain:google-analytics.com
+  - domain:analytics.google.com
+  - domain:facebook.net
+  - domain:connect.facebook.net
+  - domain:cdn.dsp-rambler.ru
+  - domain:dsp-rambler.ru
+  - domain:sync.rambler.ru
+  - domain:exchange.buzzoola.com
+  - domain:buzzoola.com
+  - domain:sync.upravel.com
+  - domain:upravel.com
+  - domain:redirect.frontend.weborama.fr
+  - domain:weborama.fr
+  - domain:sync.bumlam.com
+  - domain:bumlam.com
+  - domain:px.adhigh.net
+  - domain:adhigh.net
+  - domain:ssp.adriver.ru
+  - domain:r.stbid.ru
+  - domain:stbid.ru
+  - domain:tms.dmp.wi-fi.ru
+  - domain:dmp.wi-fi.ru
+  # Imported broad ad/tracker blocklist.
+  - domain:amazon-adsystem.com
+  - domain:aax.amazon-adsystem.com
+  - domain:aan.amazon.com
+  - domain:ad.doubleclick.net
+  - domain:pubads.g.doubleclick.net
+  - domain:media.net
+  - domain:static.media.net
+  - domain:contextual.media.net
+  - domain:static.criteo.net
+  - domain:bidder.criteo.com
+  - domain:cdn.taboola.com
+  - domain:trc.taboola.com
+  - domain:images.taboola.com
+  - domain:nr.taboola.com
+  - domain:api.taboola.com
+  - domain:log.outbrain.com
+  - domain:widgets.outbrain.com
+  - domain:odb.outbrain.com
+  - domain:cdn.mgid.com
+  - domain:servicer.mgid.com
+  - domain:bat.bing.com
+  - domain:bingads.microsoft.com
+  - domain:ads.microsoft.com
+  - domain:propellerads.com
+  - domain:applovin.com
+  - domain:d.applovin.com
+  - domain:rt.applovin.com
+  - domain:ms.applovin.com
+  - domain:api.vungle.com
+  - domain:vungle.com
+  - domain:liftoff.io
+  - domain:ib.adnxs.com
+  - domain:secure.adnxs.com
+  - domain:acdn.adnxs.com
+  - domain:prebid.adnxs.com
+  - domain:ads.pubmatic.com
+  - domain:image6.pubmatic.com
+  - domain:hbopenbid.pubmatic.com
+  - domain:us-ads.openx.net
+  - domain:rtb.openx.net
+  - domain:u.openx.net
+  - domain:pixel.rubiconproject.com
+  - domain:fastlane.rubiconproject.com
+  - domain:spotxchange.com
+  - domain:indexexchange.com
+  - domain:casalemedia.com
+  - domain:as.casalemedia.com
+  - domain:cdn.indexexchange.com
+  - domain:htlb.casalemedia.com
+  - domain:ads.yahoo.com
+  - domain:gemini.yahoo.com
+  - domain:adtech.yahooinc.com
+  - domain:auction.unityads.unity3d.com
+  - domain:webview.unityads.unity3d.com
+  - domain:config.unityads.unity3d.com
+  - domain:adserver.unityads.unity3d.com
+  - domain:unityads.unity3d.com
+  - domain:adfox.yandex.ru
+  - domain:adfstat.yandex.ru
+  - domain:extmaps-api.yandex.net
+  - domain:offerwall.yandex.net
+  - domain:live.chartboost.com
+  - domain:init.supersonicads.com
+  - domain:api.fyber.com
+  - domain:inmobi.com
+  - domain:ironsource.mobi
+  - domain:is.com
+  - domain:outcome-ssp.supersonicads.com
+  - domain:adsrvr.org
+  - domain:smartyads.com
+  - domain:ad.gt
+  - domain:contextweb.com
+  - domain:sharethrough.com
+  - domain:eb2.3lift.com
+  - domain:tlx.3lift.com
+  - domain:apex.go.sonobi.com
+  - domain:c.gumgum.com
+  - domain:a.teads.tv
+  - domain:cdn.teads.tv
+  - domain:cdn.kargo.com
+  - domain:sync.kargo.com
+  - domain:d.adroll.com
+  - domain:s.adroll.com
+  - domain:adroll.com
+  - domain:pangleglobal.com
+  - domain:doubleverify.com
+  - domain:cdn.doubleverify.com
+  - domain:pixel.adsafeprotected.com
+  - domain:static.adsafeprotected.com
+  - domain:fw.adsafeprotected.com
+  - domain:ads.exosrv.com
+  - domain:insightexpressai.com
+  - domain:click.googleanalytics.com
+  - domain:ssl.google-analytics.com
+  - domain:www.google-analytics.com
+  - domain:tagmanager.google.com
+  - domain:www.googletagmanager.com
+  - domain:analytics.adobe.io
+  - domain:clarity.ms
+  - domain:c.clarity.ms
+  - domain:s.clarity.ms
+  - domain:static.hotjar.com
+  - domain:script.hotjar.com
+  - domain:vars.hotjar.com
+  - domain:in.hotjar.com
+  - domain:heapanalytics.com
+  - domain:cdn.heapanalytics.com
+  - domain:api.mixpanel.com
+  - domain:api-js.mixpanel.com
+  - domain:decide.mixpanel.com
+  - domain:api.amplitude.com
+  - domain:api2.amplitude.com
+  - domain:cdn.segment.com
+  - domain:api.segment.io
+  - domain:rs.fullstory.com
+  - domain:quantserve.com
+  - domain:pixel.quantserve.com
+  - domain:quantcast.com
+  - domain:sb.scorecardresearch.com
+  - domain:b.scorecardresearch.com
+  - domain:fingerprintjs.com
+  - domain:fpjs.io
+  - domain:api.fpjs.io
+  - domain:siftscience.com
+  - domain:cdn.siftscience.com
+  - domain:permutive.com
+  - domain:cdn.permutive.com
+  - domain:bluekai.com
+  - domain:onetag-sys.com
+  - domain:pippio.com
+  - domain:id5-sync.com
+  - domain:thetradedesk.com
+  - domain:sync.mathtag.com
+  - domain:pixel.mathtag.com
+  - domain:crwdcntrl.net
+  - domain:bidswitch.net
+  - domain:tapad.com
+  - domain:prod.uidapi.com
+  - domain:idsync.rlcdn.com
+  - domain:api.rlcdn.com
+  - domain:app.appsflyer.com
+  - domain:appsflyer.com
+  - domain:app.adjust.com
+  - domain:adjust.com
+  - domain:api2.branch.io
+  - domain:bnc.lt
+  - domain:kochava.com
+  - domain:control.kochava.com
+  - domain:singular.net
+  - domain:wzrkt.com
+  - domain:clevertap-prod.com
+  - domain:notify.bugsnag.com
+  - domain:browser.sentry-cdn.com
+  - domain:bam.nr-data.net
+  - domain:coinimp.com
+  - domain:www.coinimp.com
+  - domain:webminepool.com
+  - domain:minero.cc
+  - domain:mineralt.io
+  - domain:jsecoin.com
+  - domain:crypto-loot.org
+  - domain:monerominer.rocks
+  - domain:popads.net
+  - domain:popcash.net
+  - domain:propellerclick.com
+  - domain:onclickads.net
+  - domain:popmyads.com
+  - domain:clickadu.com
+  - domain:trafficjunky.net
+  - domain:exoclick.com
+  - domain:juicyads.com
+  - domain:2giga.link
+  - domain:greatis.com
+  - domain:statdynamic.com
+  - domain:pixel.facebook.com
+  - domain:an.facebook.com
+  - domain:graph.facebook.com
+  - domain:tr.facebook.com
+  - domain:sc-static.net
+  - domain:tr.snapchat.com
+  - domain:ads.snapchat.com
+  - domain:sc-analytics.appspot.com
+  - domain:ads.linkedin.com
+  - domain:analytics.pointdrive.linkedin.com
+  - domain:snap.licdn.com
+  - domain:px.ads.linkedin.com
+  - domain:static.ads-twitter.com
+  - domain:ads-api.twitter.com
+  - domain:ads-api.x.com
+  - domain:analytics.twitter.com
+  - domain:ads.x.com
+  - domain:events.reddit.com
+  - domain:events.redditmedia.com
+  - domain:d.reddit.com
+  - domain:ads-api.tiktok.com
+  - domain:analytics.tiktok.com
+  - domain:ads-sg.tiktok.com
+  - domain:analytics-sg.tiktok.com
+  - domain:business-api.tiktok.com
+  - domain:ads.tiktok.com
+  - domain:log.byteoversea.com
+  - domain:mon.byteoversea.com
+  - domain:ct.pinterest.com
+  - domain:log.pinterest.com
+  - domain:trk.pinterest.com
+  - domain:pixel.quora.com
+  - domain:px.srvcs.tumblr.com
+  - domain:iadsdk.apple.com
+  - domain:metrics.icloud.com
+  - domain:api-adservices.apple.com
+  - domain:books-analytics-events.apple.com
+  - domain:weather-analytics-events.apple.com
+  - domain:notes-analytics-events.apple.com
+  - domain:metrics.mzstatic.com
+  - domain:iot-eu-logser.realme.com
+  - domain:iot-logser.realme.com
+  - domain:bdapi-ads.realmemobile.com
+  - domain:bdapi-in-ads.realmemobile.com
+  - domain:adsfs.oppomobile.com
+  - domain:adx.ads.oppomobile.com
+  - domain:ck.ads.oppomobile.com
+  - domain:data.ads.oppomobile.com
+  - domain:click.oneplus.cn
+  - domain:open.oneplus.net
+  - domain:metrics.data.hicloud.com
+  - domain:metrics2.data.hicloud.com
+  - domain:grs.hicloud.com
+  - domain:logservice.hicloud.com
+  - domain:logservice1.hicloud.com
+  - domain:logbak.hicloud.com
+  - domain:ads.huawei.com
+  - domain:api.ad.xiaomi.com
+  - domain:data.mistat.xiaomi.com
+  - domain:data.mistat.india.xiaomi.com
+  - domain:data.mistat.rus.xiaomi.com
+  - domain:sdkconfig.ad.xiaomi.com
+  - domain:sdkconfig.ad.intl.xiaomi.com
+  - domain:tracking.rus.miui.com
+  - domain:tracking.miui.com
+  - domain:samsungads.com
+  - domain:smetrics.samsung.com
+  - domain:nmetrics.samsung.com
+  - domain:samsung-com.112.2o7.net
+  - domain:analytics-api.samsunghealthcn.com
+  - domain:config.samsungads.com
+  - domain:adlog.vivo.com
+  - domain:ads-api.vivo.com
+  - domain:a.lenovo.com
+  - domain:us.info.lgsmartad.com
+  - domain:us.ibs.lgappstv.com
+  - domain:ad.lgappstv.com
+  - domain:info.lgsmartad.com
+  - domain:ngfts.lge.com
+  - domain:yumenetworks.com
+  - domain:smartclip.net
+  - domain:smartclip.com
+  - domain:settings-win.data.microsoft.com
+  - domain:vortex.data.microsoft.com
+  - domain:vortex-win.data.microsoft.com
+  - domain:watson.telemetry.microsoft.com
+  - domain:telemetry.microsoft.com
+  - domain:device-metrics-us.amazon.com
+  - domain:device-metrics-us-2.amazon.com
+  - domain:mads-eu.amazon.com
+  - domain:logs.roku.com
+  - domain:ads.roku.com
+  - domain:ads.vizio.com
+  - domain:tvinteractive.tv
+  - domain:tvpixel.com
+  - domain:app-measurement.com
+  - domain:firebase-settings.crashlytics.com
+  - domain:pagead.l.doubleclick.net
+  - domain:cdn.cookielaw.org
+  - domain:geolocation.onetrust.com
+  - domain:consent.cookiebot.com
+  - domain:consentcdn.cookiebot.com
+  - domain:cookiebot.com
+  - domain:consent.trustarc.com
+  - domain:sdk.privacy-center.org
+  - domain:cdn.privacy-mgmt.com
+  - domain:app.usercentrics.eu
+  - domain:www.anrdoezrs.net
+  - domain:www.dpbolvw.net
+  - domain:www.tkqlhce.com
+  - domain:shareasale.com
+  - domain:shareasale-analytics.com
+  - domain:click.linksynergy.com
+  - domain:ad.linksynergy.com
+  - domain:track.linksynergy.com
+  - domain:impact.com
+  - domain:d.impactradius-event.com
+  - domain:api.impact.com
+  - domain:www.awin1.com
+  - domain:zenaps.com
+  - domain:partnerstack.com
+  - domain:api.partnerstack.com
+  - domain:refersion.com
+  - domain:api.refersion.com
+  - domain:s.skimresources.com
+  - domain:t.skimresources.com
+  - domain:go.skimresources.com
+  - domain:redirector.skimresources.com
+  - domain:redirect.viglink.com
+  - domain:cdn.viglink.com
+  - domain:api.viglink.com
+  - domain:ir-na.amazon-adsystem.com
+  - domain:rcm-na.amazon-adsystem.com
+  - domain:ws-na.amazon-adsystem.com
+  - domain:cdn.optimizely.com
+  - domain:logx.optimizely.com
+  - domain:api.optimizely.com
+  - domain:cdn.dynamicyield.com
+  - domain:list-manage.com
+  - domain:track.hubspot.com
+  - domain:munchkin.marketo.net
+  - domain:trackcmp.net
+  - domain:widget.intercom.io
+  - domain:js.driftt.com
+  - domain:imasdk.googleapis.com
+  - domain:dai.google.com
+  - domain:g.jwpsrv.com
+  - domain:ssl.p.jwpcdn.com
+  - domain:mssl.fwmrm.net
+  - domain:cd.connatix.com
+  - domain:capi.connatix.com
+  - domain:vid.connatix.com
+  - domain:metrics.brightcove.com
+  - domain:s.innovid.com
+  - domain:tremorhub.com
+  - domain:ads.tremorhub.com
+  - domain:advertising.yahoo.com
+  - domain:udcm.yahoo.com
+  - domain:udc.yahoo.com
+  - domain:c.bing.com
+  - domain:advertising.yandex.ru
+  - domain:adtago.s3.amazonaws.com
+  - domain:analyticsengine.s3.amazonaws.com
+  - domain:analytics.s3.amazonaws.com
+  - domain:advice-ads.s3.amazonaws.com
+  - domain:stats.g.doubleclick.net
+  - domain:mediavisor.doubleclick.net
+  - domain:adservetx.media.net
+  - domain:pagead2.googleadservices.com
+  - domain:afs.googlesyndication.com
+  - domain:ads30.adcolony.com
+  - domain:adc3-launch.adcolony.com
+  - domain:events3alt.adcolony.com
+  - domain:wd.adcolony.com
+  - domain:mouseflow.com
+  - domain:cdn.mouseflow.com
+  - domain:o2.mouseflow.com
+  - domain:gtm.mouseflow.com
+  - domain:api.mouseflow.com
+  - domain:tools.mouseflow.com
+  - domain:cdn-test.mouseflow.com
+  - domain:luckyorange.com
+  - domain:api.luckyorange.com
+  - domain:realtime.luckyorange.com
+  - domain:cdn.luckyorange.com
+  - domain:w1.luckyorange.com
+  - domain:upload.luckyorange.net
+  - domain:cs.luckyorange.net
+  - domain:settings.luckyorange.net
+  - domain:adm.hotjar.com
+  - domain:identify.hotjar.com
+  - domain:insights.hotjar.com
+  - domain:surveys.hotjar.com
+  - domain:careers.hotjar.com
+  - domain:events.hotjar.io
+  - domain:freshmarketer.com
+  - domain:claritybt.freshmarketer.com
+  - domain:fwtracks.freshmarketer.com
+  - domain:stats.wp.com
+  - domain:sessions.bugsnag.com
+  - domain:api.bugsnag.com
+  - domain:app.bugsnag.com
+  - domain:app.getsentry.com
+  - domain:ads.pinterest.com
+  - domain:analytics.yahoo.com
+  - domain:geo.yahoo.com
+  - domain:analytics.query.yahoo.com
+  - domain:partnerads.ysm.yahoo.com
+  - domain:log.fc.yahoo.com
+  - domain:app.posthog.com
+  - domain:eu.posthog.com
+  - domain:us.i.posthog.com
+  - domain:posthog.com
+  - domain:rudderstack.com
+  - domain:snowplowanalytics.com
+  - domain:o0.ingest.sentry.io
+  - domain:cdn.lr-ingest.com
+  - domain:r.lr-ingest.com
+  - domain:fls-na.amazon.com
+  - domain:stackadapt.com
+  - domain:htlbid.com
+  - domain:edge.fullstory.com
+  - domain:cdn.rudderlabs.com
+  - domain:sync-tm.everesttech.net
+  - domain:rum.browser-intake-datadoghq.com
+  - domain:bam-cell.nr-data.net
+  - domain:js-agent.newrelic.com
+  - domain:qevents.quora.com
+  - domain:fundingchoicesmessages.google.com
+  - domain:an.yandex.ru
+  - domain:yabs.yandex.ru
+  - domain:bs.yandex.ru
+  - domain:awaps.yandex.ru
+  - domain:adsdk.yandex.ru
+  - domain:mobile.yandexadexchange.net
+  - domain:yandexadexchange.net
+  - domain:top.mail.ru
+  - domain:target.my.com
+  - domain:mytarget.ru
+  - domain:tns-counter.ru
+  - domain:www.tns-counter.ru
+  - domain:yadro.ru
+  - domain:openstat.net
+  - domain:spylog.com
+  - domain:liveinternet.ru
+  - domain:hotlog.ru
+  - domain:mailcounter.ru
+  - domain:profile.ad-tech.ru
+  - domain:ad-tech.ru
+  - domain:adfox.ru
+  - domain:adriver.ru
+  - domain:mradx.net
+  - domain:betweendigital.com
+  - domain:betweenexchange.com
+  - domain:otm-r.com
+  - domain:getintent.com
+  - domain:soloway.ru
+  - domain:kadam.net
+  - domain:marketgid.com
+  - domain:directadvert.ru
+  - domain:videonow.ru
+  - domain:videoroll.net
+  - domain:relap.io
+  - domain:smi2.ru
+  - domain:lentainform.com
+  - domain:mixadvert.com
+  - domain:teasernet.com
+  - domain:bodyclick.net
+  - domain:actionpay.ru
+  - domain:cityads.com
+  - domain:advertur.ru
+  - domain:advmaker.ru
+  - domain:rotaban.ru
+  - domain:redtram.com
+  - domain:recreativ.ru
+  - domain:trafmag.com
+  - domain:visitweb.com
+  - domain:tizerbox.ru
+  - domain:xp.apple.com
+  - domain:widgets.pinterest.com
+  - domain:privacyportal.onetrust.com
+  - domain:cmp.osano.com
+  - domain:clientstream.launchdarkly.com
+  - domain:click.mailchimp.com
+  - domain:braze.com
+  - domain:sdk.iad-01.braze.com
+  - domain:cdn.onesignal.com
+  - domain:api.onesignal.com
+  - domain:klaviyo.com
+  - domain:static.klaviyo.com
+  - domain:a.klaviyo.com
+  - domain:customer.io

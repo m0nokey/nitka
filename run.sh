@@ -5,7 +5,7 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$ROOT_DIR/controller/compose.yml"
 IMAGE="local/nitka:latest"
 BASE_IMAGE="alpine:3.23"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/xray"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nitka"
 
 # Match the container process to the host user so the 0700 Vault directory
 # remains writable without granting the controller root privileges.

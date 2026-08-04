@@ -26,7 +26,7 @@
   ansible.builtin.copy:
     dest: "{{ cascade_egress_remote_dir }}/ssh_tun_server/authorized_keys"
     mode: "0600"
-    content: "command=\"/bin/false\",no-agent-forwarding,no-pty,no-user-rc,no-X11-forwarding {{ cascade_ssh_tun_ssh_public_key }}\n"
+    content: "no-agent-forwarding,no-pty,no-user-rc,no-X11-forwarding {{ cascade_ssh_tun_ssh_public_key }}\n"
   notify: Restart egress stack
 
 - name: Copy SSH TUN server host keypair to server endpoint

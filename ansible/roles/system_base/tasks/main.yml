@@ -247,47 +247,47 @@
       APT::Periodic::Unattended-Upgrade "1";
   when: system_base_enable_os_updater | bool
 
-- name: Install Nitka OS updater
+- name: Install OS updater
   ansible.builtin.template:
     src: nitka-os-updater.j2
-    dest: /usr/local/sbin/nitka-os-updater
+    dest: "/usr/local/sbin/{{ system_base_os_updater_name }}-os-updater"
     owner: root
     group: root
     mode: "0755"
   when: system_base_enable_os_updater | bool
 
-- name: Install Nitka OS updater logrotate config
+- name: Install OS updater logrotate config
   ansible.builtin.template:
     src: nitka-os-updater.logrotate.j2
-    dest: /etc/logrotate.d/nitka-os-updater
+    dest: "/etc/logrotate.d/{{ system_base_os_updater_name }}-os-updater"
     owner: root
     group: root
     mode: "0644"
   when: system_base_enable_os_updater | bool
 
-- name: Install Nitka OS updater service
+- name: Install OS updater service
   ansible.builtin.template:
     src: nitka-os-updater.service.j2
-    dest: /etc/systemd/system/nitka-os-updater.service
+    dest: "/etc/systemd/system/{{ system_base_os_updater_name }}-os-updater.service"
     owner: root
     group: root
     mode: "0644"
   when: system_base_enable_os_updater | bool
   register: system_base_os_updater_service
 
-- name: Install Nitka OS updater timer
+- name: Install OS updater timer
   ansible.builtin.template:
     src: nitka-os-updater.timer.j2
-    dest: /etc/systemd/system/nitka-os-updater.timer
+    dest: "/etc/systemd/system/{{ system_base_os_updater_name }}-os-updater.timer"
     owner: root
     group: root
     mode: "0644"
   when: system_base_enable_os_updater | bool
   register: system_base_os_updater_timer
 
-- name: Enable Nitka OS updater timer
+- name: Enable OS updater timer
   ansible.builtin.systemd_service:
-    name: nitka-os-updater.timer
+    name: "{{ system_base_os_updater_name }}-os-updater.timer"
     enabled: true
     state: started
     daemon_reload: >-
@@ -295,7 +295,7 @@
          system_base_os_updater_timer.changed }}
   when: system_base_enable_os_updater | bool
 
-- name: Install Nitka Docker updater
+- name: Install Docker updater
   ansible.builtin.template:
     src: docker-project-updater.j2
     dest: "/usr/local/sbin/{{ system_base_docker_updater_name }}-docker-updater"
@@ -304,7 +304,7 @@
     mode: "0755"
   when: system_base_enable_docker_updater | bool
 
-- name: Install Nitka Docker updater service
+- name: Install Docker updater service
   ansible.builtin.template:
     src: docker-project-updater.service.j2
     dest: >-
@@ -316,7 +316,7 @@
   when: system_base_enable_docker_updater | bool
   register: system_base_docker_updater_service
 
-- name: Install Nitka Docker updater timer
+- name: Install Docker updater timer
   ansible.builtin.template:
     src: docker-project-updater.timer.j2
     dest: >-
@@ -328,7 +328,7 @@
   when: system_base_enable_docker_updater | bool
   register: system_base_docker_updater_timer
 
-- name: Enable Nitka Docker updater timer
+- name: Enable Docker updater timer
   ansible.builtin.systemd_service:
     name: "{{ system_base_docker_updater_name }}-docker-updater.timer"
     enabled: true

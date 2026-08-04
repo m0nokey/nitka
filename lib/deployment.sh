@@ -469,13 +469,13 @@ add_cascade() {
     done
 
     pipeline_start "Installing Cascade VPN" install
-    if ! deploy_node "$egress_node" "$cascade_state" "" 1 bootstrap-only; then
+    if ! deploy_node "$egress_node" "$cascade_state" "" 1 bootstrap-only cascade-egress; then
         pipeline_abort
         rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
         show_result_screen "Cascade egress bootstrap failed. The Vault was not changed."
         return 1
     fi
-    if ! deploy_node "$ingress_node" "$cascade_state" "" 1 bootstrap-only; then
+    if ! deploy_node "$ingress_node" "$cascade_state" "" 1 bootstrap-only cascade-ingress; then
         pipeline_abort
         rm -f "$before" "$egress_state" "$ingress_state" "$shared_state" "$cascade_state"
         show_result_screen "Cascade ingress bootstrap failed. The Vault was not changed."
@@ -498,7 +498,7 @@ add_cascade() {
 }
 
 deploy_node() {
-    local node="$1" state_file="${2:-}" connect_port="${3:-}" bootstrap_mode="${4:-0}" deployment_mode="${5:-xray}" before extra inventory inventory_dir key_file known_hosts_file host_key_file user host port target_port management_port bootstrap bootstrap_password bootstrap_user host_public_key ssh_common_args rc marked hardened_state ssh_host_public_key ssh_host_fingerprint actual_fingerprint
+    local node="$1" state_file="${2:-}" connect_port="${3:-}" bootstrap_mode="${4:-0}" deployment_mode="${5:-xray}" inventory_alias="${6:-$node}" before extra inventory inventory_dir key_file known_hosts_file host_key_file user host port target_port management_port bootstrap bootstrap_password bootstrap_user host_public_key ssh_common_args rc marked hardened_state mapped_state ssh_host_public_key ssh_host_fingerprint actual_fingerprint candidate_port
     before="$(mktemp)"
     extra="$(mktemp)"
     inventory_dir="$(mktemp -d /tmp/xray-inventory.XXXXXX)"
@@ -527,7 +527,7 @@ deploy_node() {
         user="$bootstrap_user"
         port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]].get("bootstrap_ssh_port", 22))' "$node" <"$before")"
         bootstrap_password="$(yaml_scalar "$bootstrap_password")"
-        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_password: $bootstrap_password" "          ansible_become_password: $bootstrap_password" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o ConnectionAttempts=1 -o PubkeyAuthentication=no -o PreferredAuthentications=password'" >"$inventory"
+        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $inventory_alias:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_password: $bootstrap_password" "          ansible_become_password: $bootstrap_password" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o ConnectionAttempts=1 -o PubkeyAuthentication=no -o PreferredAuthentications=password'" >"$inventory"
     elif [[ -n "$bootstrap" ]]; then
         user="$bootstrap_user"
         printf '%s' "$bootstrap" >"$key_file"
@@ -540,7 +540,7 @@ deploy_node() {
         else
             ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes"
         fi
-        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '$ssh_common_args'" >"$inventory"
+        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $inventory_alias:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '$ssh_common_args'" >"$inventory"
     else
         user=deploy
         python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_private_key"], end="")' "$node" <"$before" >"$key_file"
@@ -553,7 +553,7 @@ deploy_node() {
         else
             ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes"
         fi
-        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '$ssh_common_args'" >"$inventory"
+        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $inventory_alias:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '$ssh_common_args'" >"$inventory"
     fi
     chmod 600 "$key_file"
     if [[ -n "$bootstrap_password" ]]; then
@@ -587,7 +587,7 @@ deploy_node() {
     else
         ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes"
     fi
-    printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: deploy" "          ansible_port: $port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '$ssh_common_args'" >"$inventory"
+    printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $inventory_alias:" "          ansible_host: $host" "          ansible_user: deploy" "          ansible_port: $port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '$ssh_common_args'" >"$inventory"
     if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/harden_ssh.yml" --private-key "$key_file"; then
         :
     else
@@ -596,14 +596,23 @@ deploy_node() {
         return "$rc"
     fi
 
-    ssh_host_public_key="$(printf '%s\n' "$LAST_ANSIBLE_OUTPUT" | sed -n 's/.*XRAY_SSH_HOST_PUBLIC_KEY=\(ssh-ed25519 [A-Za-z0-9+/=]*\).*/\1/p' | tail -n 1)"
-    ssh_host_fingerprint="$(printf '%s\n' "$LAST_ANSIBLE_OUTPUT" | sed -n 's/.*XRAY_SSH_HOST_FINGERPRINT=\(SHA256:[A-Za-z0-9+/=]*\).*/\1/p' | tail -n 1)"
+    ssh_host_public_key=""
+    for candidate_port in "$target_port" "$management_port"; do
+        [[ -n "$candidate_port" ]] || continue
+        ssh_host_public_key="$(ssh-keyscan -T 8 -p "$candidate_port" "$host" 2>/dev/null \
+            | awk '$2 == "ssh-ed25519" { print $2 " " $3; exit }')"
+        [[ -n "$ssh_host_public_key" ]] && break
+    done
+    ssh_host_fingerprint=""
+    if [[ -n "$ssh_host_public_key" ]]; then
+        printf '%s\n' "$ssh_host_public_key" >"$host_key_file"
+        ssh_host_fingerprint="$(ssh-keygen -lf "$host_key_file" -E sha256 2>/dev/null | awk '{print $2}')"
+    fi
     if [[ -z "$ssh_host_public_key" || -z "$ssh_host_fingerprint" ]]; then
-        printf '%s\n' "SSH hardening completed, but the VPS host key could not be returned to the client."
+        printf '%s\n' "SSH hardening completed, but the VPS host key could not be verified."
         rm -f "$before" "$extra" "$key_file"; rm -rf "$inventory_dir"
         return 1
     fi
-    printf '%s\n' "$ssh_host_public_key" >"$host_key_file"
     actual_fingerprint="$(ssh-keygen -lf "$host_key_file" -E sha256 2>/dev/null | awk '{print $2}')"
     if [[ "$actual_fingerprint" != "$ssh_host_fingerprint" ]]; then
         printf '%s\n' "The returned SSH host key fingerprint is invalid."
@@ -616,35 +625,48 @@ deploy_node() {
         return 1
     fi
     mv -f "$hardened_state" "$before"
-    printf '[%s]:%s %s\n' "$host" "$target_port" "$ssh_host_public_key" >"$known_hosts_file"
+    {
+        printf '[%s]:%s %s\n' "$host" "$target_port" "$ssh_host_public_key"
+        [[ "$management_port" == "$target_port" ]] || printf '[%s]:%s %s\n' "$host" "$management_port" "$ssh_host_public_key"
+    } >"$known_hosts_file"
     chmod 600 "$known_hosts_file"
 
     pipeline_stage 70 'Verifying hardened SSH access'
     pipeline_render
-    local verify_attempt verified=0
-    for verify_attempt in {1..12}; do
-        if ssh -i "$key_file" -p "$target_port" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o ConnectTimeout=8 \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$known_hosts_file" \
-            -o LogLevel=ERROR \
-            deploy@"$host" true; then
-            verified=1
-            break
+    local verify_attempt verified=0 verified_port=""
+    local -a candidate_ports=()
+    for candidate_port in "$target_port" "$management_port"; do
+        [[ -n "$candidate_port" ]] || continue
+        if [[ ! " ${candidate_ports[*]} " == *" $candidate_port "* ]]; then
+            candidate_ports+=("$candidate_port")
         fi
+    done
+    for verify_attempt in {1..12}; do
+        for candidate_port in "${candidate_ports[@]}"; do
+            if ssh -i "$key_file" -p "$candidate_port" \
+                -o IdentitiesOnly=yes \
+                -o BatchMode=yes \
+                -o ConnectTimeout=8 \
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile="$known_hosts_file" \
+                -o LogLevel=ERROR \
+                deploy@"$host" true; then
+                verified=1
+                verified_port="$candidate_port"
+                break 2
+            fi
+        done
         if ((verify_attempt < 12)); then
             sleep 5
         fi
     done
     if ((verified == 0)); then
-        printf '%s\n' "Deployment completed, but the generated SSH port could not be verified: $target_port."
+        printf '%s\n' "Deployment completed, but no external SSH port could be verified."
         rm -f "$before" "$extra" "$key_file" "$host_key_file" "$known_hosts_file"
         rm -rf "$inventory_dir"
         return 1
     fi
-    ssh -i "$key_file" -p "$target_port" \
+    ssh -i "$key_file" -p "$verified_port" \
         -o IdentitiesOnly=yes \
         -o BatchMode=yes \
         -o ConnectTimeout=8 \
@@ -655,8 +677,16 @@ deploy_node() {
         'sudo -n sh -c "systemctl stop nitka-ssh-rollback.timer nitka-ssh-rollback.service 2>/dev/null || true; systemctl reset-failed nitka-ssh-rollback.timer nitka-ssh-rollback.service 2>/dev/null || true"' \
         || true
 
+    mapped_state="$(mktemp "$RUNTIME_TMP_DIR/.mapped.XXXXXX")"
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" set-ssh-mapping "$node" "$verified_port" "$target_port" <"$before" >"$mapped_state"; then
+        rm -f "$before" "$extra" "$key_file" "$host_key_file" "$known_hosts_file" "$mapped_state"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
+    mv -f "$mapped_state" "$before"
+
     if [[ "$deployment_mode" != bootstrap-only ]]; then
-        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: deploy" "          ansible_port: $target_port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" >"$inventory"
+        printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $inventory_alias:" "          ansible_host: $host" "          ansible_user: deploy" "          ansible_port: $verified_port" "          ansible_ssh_private_key_file: $key_file" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" >"$inventory"
         if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/site.yml" --private-key "$key_file"; then
             :
         else
@@ -687,8 +717,132 @@ deploy_node() {
     rm -rf "$inventory_dir"
 }
 
+cascade_deployment_for_node() {
+    local node="$1" state_file="$2"
+    python3 - "$node" "$state_file" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+for deployment_id, deployment in state.get("deployments", {}).items():
+    ingress = deployment.get("roles", {}).get("ingress", {})
+    if ingress.get("node") == sys.argv[1]:
+        print(deployment_id)
+        break
+PY
+}
+
+run_cascade_ingress_playbook() {
+    local deployment_id="$1" state_file="${2:-}" operation_title="${3:-Updating Cascade ingress}" operation="${4:-}"
+    local before extra inventory inventory_dir key_file known_hosts_file ingress_node host user port rc pipeline_owned=0
+    local inventory_alias="cascade-ingress"
+    local -a ansible_extra_args
+    before="$(mktemp)"
+    extra="$(mktemp)"
+    inventory_dir="$(mktemp -d /tmp/nitka-cascade-ingress-inventory.XXXXXX)"
+    inventory="$inventory_dir/hosts.yml"
+    key_file="$inventory_dir/id_ed25519"
+    known_hosts_file="$inventory_dir/known_hosts"
+
+    if [[ -n "$state_file" ]]; then
+        cp "$state_file" "$before"
+    elif ! read_vault_state "$before"; then
+        rm -f "$before" "$extra"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+        --cascade-local-root "$STATE_DIR/cascade" \
+        extract-cascade "$deployment_id" <"$before" >"$extra"; then
+        rm -f "$before" "$extra"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
+    ansible_extra_args=(-e "@$extra")
+    ingress_node="$(python3 - "$deployment_id" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+print(state["deployments"][sys.argv[1]]["roles"]["ingress"]["node"])
+PY
+)"
+    host="$(python3 - "$ingress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["host"])
+PY
+)"
+    user="$(python3 - "$ingress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_user"])
+PY
+)"
+    port="$(python3 - "$ingress_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_port"])
+PY
+)"
+    if ! write_node_known_hosts "$before" "$ingress_node" "$known_hosts_file"; then
+        printf '%s\n' "The SSH host key is not pinned for this Cascade ingress."
+        rm -f "$before" "$extra"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
+    python3 - "$ingress_node" "$before" >"$key_file" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["management_private_key"], end="")
+PY
+    chmod 600 "$key_file"
+    printf '%s\n' \
+        "---" \
+        "all:" \
+        "  children:" \
+        "    cascade_ingress:" \
+        "      hosts:" \
+        "        $inventory_alias:" \
+        "          ansible_host: $host" \
+        "          ansible_user: $user" \
+        "          ansible_port: $port" \
+        "          ansible_ssh_private_key_file: $key_file" \
+        "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" \
+        >"$inventory"
+    chmod 600 "$inventory"
+    if ((DEBUG_MODE == 0 && PIPELINE_ACTIVE == 0)); then
+        pipeline_start "$operation_title" "$operation"
+        pipeline_owned=1
+    fi
+    if run_ansible_playbook -i "$inventory" "${ansible_extra_args[@]}" "$ROOT_DIR/ansible/cascade_ingress.yml" --private-key "$key_file"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    rm -f "$before" "$extra" "$key_file"
+    rm -rf "$inventory_dir"
+    if ((pipeline_owned)) && ((rc != 0)); then
+        pipeline_abort
+    fi
+    if ((rc == 0)) && [[ -n "$state_file" ]]; then
+        local normalized
+        normalized="$(mktemp)"
+        if ! python3 "$ROOT_DIR/scripts/state_cli.py" set-management-user "$ingress_node" deploy <"$state_file" >"$normalized"; then
+            rm -f "$normalized"
+            return 1
+        fi
+        mv -f "$normalized" "$state_file"
+    fi
+    return "$rc"
+}
+
 run_node_playbook() {
-    local node="$1" playbook="$2" state_file="${3:-}" operation_title="${4:-Updating VPN server}" operation="${5:-}" before extra inventory inventory_dir key_file known_hosts_file host port rc pipeline_owned=0
+    local node="$1" playbook="$2" state_file="${3:-}" operation_title="${4:-Updating VPN server}" operation="${5:-}" inventory_alias="${6:-$node}" before extra inventory inventory_dir key_file known_hosts_file host user port rc pipeline_owned=0
     before="$(mktemp)"
     extra="$(mktemp)"
     inventory_dir="$(mktemp -d /tmp/xray-inventory.XXXXXX)"
@@ -708,9 +862,10 @@ run_node_playbook() {
         return 1
     fi
     host="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["host"])' "$node" <"$before")"
+    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_user"])' "$node" <"$before")"
     port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_port"])' "$node" <"$before")"
     python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_private_key"], end="")' "$node" <"$before" >"$key_file"
-    printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: deploy" "          ansible_port: $port" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" >"$inventory"
+    printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $inventory_alias:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" >"$inventory"
     chmod 600 "$key_file"
     if ((DEBUG_MODE == 0 && PIPELINE_ACTIVE == 0)); then
         pipeline_start "$operation_title" "$operation"
@@ -726,14 +881,23 @@ run_node_playbook() {
     if ((pipeline_owned)); then
         ((rc != 0)) && pipeline_abort
     fi
+    if ((rc == 0)) && [[ -n "$state_file" ]]; then
+        local normalized
+        normalized="$(mktemp)"
+        if ! python3 "$ROOT_DIR/scripts/state_cli.py" set-management-user "$node" deploy <"$state_file" >"$normalized"; then
+            rm -f "$normalized"
+            return 1
+        fi
+        mv -f "$normalized" "$state_file"
+    fi
     return "$rc"
 }
 
 run_cascade_playbooks() {
-    local deployment_id="$1" state_file="${2:-}" before extra inventory inventory_dir
+    local deployment_id="$1" state_file="${2:-}" mode="${3:-full}" before extra inventory inventory_dir
     local known_hosts_file ingress_known_hosts egress_known_hosts ingress_key egress_key
     local ingress_node egress_node ingress_host egress_host ingress_port egress_port
-    local ingress_user egress_user rc
+    local ingress_user egress_user ingress_alias egress_alias node normalized rc policy_present
     before="$(mktemp)"
     extra="$(mktemp)"
     inventory_dir="$(mktemp -d /tmp/xray-cascade-inventory.XXXXXX)"
@@ -753,6 +917,15 @@ run_cascade_playbooks() {
             return 1
         }
     fi
+    normalized="$(mktemp)"
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+        normalize-cascade-transport "$deployment_id" \
+        <"$before" >"$normalized"; then
+        rm -f "$before" "$extra" "$normalized"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
+    mv -f "$normalized" "$before"
     if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
         --cascade-local-root "$STATE_DIR/cascade" \
         extract-cascade "$deployment_id" <"$before" >"$extra"; then
@@ -779,6 +952,25 @@ deployment = state["deployments"][sys.argv[1]]
 print(deployment["roles"]["egress"]["node"])
 PY
 )"
+    ingress_alias="cascade-ingress"
+    egress_alias="cascade-egress"
+    policy_present="$(python3 - "$ingress_node" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+xray = state["nodes"][sys.argv[1]].get("xray", {})
+policy = xray.get("routing_policy") if isinstance(xray, dict) else None
+print("1" if isinstance(policy, dict) and policy.get("effective") is not None else "0")
+PY
+)"
+    if [[ "$mode" != management && "$policy_present" != 1 ]]; then
+        printf '%s\n' "Routing policy is missing from the encrypted Vault." >&2
+        printf '%s\n' "Import the routing policy before deploying this Cascade." >&2
+        rm -f "$before" "$extra"
+        rm -rf "$inventory_dir"
+        return 1
+    fi
     ingress_host="$(python3 - "$ingress_node" "$before" <<'PY'
 import json
 import sys
@@ -853,7 +1045,7 @@ PY
         "  children:" \
         "    cascade_ingress:" \
         "      hosts:" \
-        "        $ingress_node:" \
+        "        $ingress_alias:" \
         "          ansible_host: $ingress_host" \
         "          ansible_user: $ingress_user" \
         "          ansible_port: $ingress_port" \
@@ -861,7 +1053,7 @@ PY
         "          ansible_ssh_common_args: '-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" \
         "    cascade_egress:" \
         "      hosts:" \
-        "        $egress_node:" \
+        "        $egress_alias:" \
         "          ansible_host: $egress_host" \
         "          ansible_user: $egress_user" \
         "          ansible_port: $egress_port" \
@@ -870,18 +1062,77 @@ PY
         >"$inventory"
     chmod 600 "$inventory"
 
-    if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_egress.yml"; then
-        :
+    if [[ "$mode" == management ]]; then
+        if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/management_access.yml"; then
+            rc=0
+        else
+            rc=$?
+        fi
+    elif [[ "$mode" == ingress-only ]]; then
+        if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_ingress.yml"; then
+            rc=0
+        else
+            rc=$?
+            run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/rollback_cascade_ingress.yml" || true
+        fi
+    elif [[ "$mode" == egress-only ]]; then
+        if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_egress.yml"; then
+            rc=0
+        else
+            rc=$?
+            run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/rollback_cascade_egress.yml" || true
+        fi
     else
-        rc=$?
-        rm -f "$before" "$extra" "$ingress_key" "$egress_key"
-        rm -rf "$inventory_dir"
-        return "$rc"
+        if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_egress.yml"; then
+            :
+        else
+            rc=$?
+            run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/rollback_cascade_egress.yml" || true
+            rm -f "$before" "$extra" "$ingress_key" "$egress_key"
+            rm -rf "$inventory_dir"
+            return "$rc"
+        fi
+        normalized="$(mktemp)"
+        if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+            capture-cascade-transport-keys "$deployment_id" \
+            "$STATE_DIR/cascade/$deployment_id/ssh" \
+            <"$before" >"$normalized"; then
+            run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/rollback_cascade_egress.yml" || true
+            rm -f "$before" "$extra" "$ingress_key" "$egress_key" "$normalized"
+            rm -rf "$inventory_dir"
+            return 1
+        fi
+        mv -f "$normalized" "$before"
+        next_extra="$(mktemp)"
+        if python3 "$ROOT_DIR/scripts/state_cli.py" \
+            --cascade-local-root "$STATE_DIR/cascade" \
+            extract-cascade "$deployment_id" <"$before" >"$next_extra"; then
+            mv -f "$next_extra" "$extra"
+        else
+            run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/rollback_cascade_egress.yml" || true
+            rm -f "$before" "$extra" "$next_extra" "$ingress_key" "$egress_key"
+            rm -rf "$inventory_dir"
+            return 1
+        fi
+        if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_ingress.yml"; then
+            rc=0
+        else
+            rc=$?
+            run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/rollback_cascade_ingress.yml" || true
+            run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/rollback_cascade_egress.yml" || true
+        fi
     fi
-    if run_ansible_playbook -i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/cascade_ingress.yml"; then
-        rc=0
-    else
-        rc=$?
+    if ((rc == 0)) && [[ -n "$state_file" ]]; then
+        for node in "$ingress_node" "$egress_node"; do
+            normalized="$(mktemp)"
+            if ! python3 "$ROOT_DIR/scripts/state_cli.py" set-management-user "$node" deploy <"$before" >"$normalized"; then
+                rm -f "$before" "$extra" "$ingress_key" "$egress_key" "$normalized"
+                rm -rf "$inventory_dir"
+                return 1
+            fi
+            mv -f "$normalized" "$before"
+        done
+        cp "$before" "$state_file"
     fi
     rm -f "$before" "$extra" "$ingress_key" "$egress_key"
     rm -rf "$inventory_dir"
@@ -902,6 +1153,9 @@ create_cascade_deployment() {
         rm -f "$before" "$after"
         return 1
     fi
+    # The full deployment owns bootstrap, management hardening, and the
+    # service deployment. Transport keys are generated by the egress phase,
+    # persisted, and then consumed by the ingress phase automatically.
     if run_cascade_playbooks "$deployment_id" "$after"; then
         rc=0
     else

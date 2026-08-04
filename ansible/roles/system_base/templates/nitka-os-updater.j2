@@ -4,10 +4,10 @@ set -Eeuo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export APT_LISTCHANGES_FRONTEND=none
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-LOG=/var/log/nitka-os-updater.log
+LOG=/var/log/{{ system_base_os_updater_name }}-os-updater.log
 exec > >(tee -a "$LOG") 2>&1
 
-exec 9>/run/nitka-os-updater.lock
+exec 9>/run/{{ system_base_os_updater_name }}-os-updater.lock
 if ! flock -n 9; then
     echo "[INFO] another apt run in progress, exiting"
     exit 0
@@ -16,7 +16,8 @@ fi
 trap 'echo "[ERROR] failed at line $LINENO (exit=$?)"' ERR
 
 retry() {
-    local attempts="$1" pause="$2"
+    local attempts="$1"
+    local pause="$2"
     shift 2
     local n=1
     until "$@"; do
@@ -31,12 +32,12 @@ retry() {
 }
 
 echo "[INFO] === $(date -Is) start ==="
+
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 
 install -m0755 -d /etc/apt/keyrings || true
-curl -fsSL --tlsv1.3 --http2 --proto '=https' \
-    "https://download.docker.com/linux/debian/gpg" \
+curl -fsSL --tlsv1.3 --http2 --proto '=https' "https://download.docker.com/linux/debian/gpg" \
     | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg || true
 chmod 0644 /etc/apt/keyrings/docker.gpg || true
 
@@ -52,6 +53,7 @@ apt-get clean || true
 
 need_reboot=false
 reason=""
+
 current_kernel="$(uname -r || true)"
 latest_installed_kernel="$(ls -1 /lib/modules 2>/dev/null | sort -V | tail -1 || true)"
 if [ -n "$latest_installed_kernel" ] && [ "$current_kernel" != "$latest_installed_kernel" ]; then

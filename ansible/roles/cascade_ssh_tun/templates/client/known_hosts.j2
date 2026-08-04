@@ -1,1 +1,1 @@
-[{{ cascade_ssh_tun_public_host }}]:{{ cascade_ssh_tun_ssh_port }} {{ lookup('file', cascade_ssh_tun_ssh_key_dir ~ '/ssh_host_ed25519_key.pub') | trim }}
+[{{ cascade_ssh_tun_public_host }}]:{{ cascade_ssh_tun_ssh_port }} {% if cascade_ssh_tun_host_public_key is defined and cascade_ssh_tun_host_public_key %}{{ cascade_ssh_tun_host_public_key | trim }}{% else %}{{ lookup('file', cascade_ssh_tun_ssh_key_dir ~ '/ssh_host_ed25519_key.pub') | trim }}{% endif %}

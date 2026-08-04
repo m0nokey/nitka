@@ -1,0 +1,56 @@
+---
+- name: Bootstrap deploy management access
+  ansible.builtin.import_tasks: bootstrap.yml
+
+- name: Check whether Docker group exists
+  ansible.builtin.getent:
+    database: group
+    key: docker
+  register: system_base_docker_group_lookup
+  failed_when: false
+
+- name: Add deploy to Docker group
+  ansible.builtin.user:
+    name: "{{ system_base_deploy_user }}"
+    groups: docker
+    append: true
+  when:
+    - system_base_docker_group_lookup.ansible_facts.getent_group is defined
+    - "'docker' in system_base_docker_group_lookup.ansible_facts.getent_group"
+
+- name: Detect preserved SSH user groups
+  ansible.builtin.command:
+    argv:
+      - id
+      - -gn
+      - "{{ item }}"
+  loop: "{{ system_base_harden_ssh_preserve_users | unique | reject('in', ['root', system_base_deploy_user]) | list }}"
+  register: system_base_preserved_user_groups
+  changed_when: false
+  failed_when: false
+  loop_control:
+    label: "{{ item }}"
+
+- name: Build merged SSH AllowGroups entries
+  ansible.builtin.set_fact:
+    system_base_management_allow_groups: >-
+      {{
+        ([system_base_deploy_user] +
+         (system_base_preserved_user_groups.results
+          | selectattr('rc', 'equalto', 0)
+          | map(attribute='stdout')
+          | map('trim')
+          | reject('equalto', '')
+          | list))
+        | unique
+        | join(' ')
+      }}
+
+- name: Preserve SSH access for current and deploy users
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^AllowGroups\\s+'
+    line: "AllowGroups {{ system_base_management_allow_groups }}"
+    insertafter: '^#?AllowGroups\\s+'
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload SSH

@@ -105,7 +105,7 @@ x. exit
 ```
 
 The `nitka` container mounts the repository read-only and mounts only
-`$HOME/.local/state/xray` as writable state. It communicates with VPS nodes
+`$HOME/.local/state/nitka` as writable state. It communicates with VPS nodes
 over SSH.
 
 The `./run.sh` entrypoint starts the interactive controller. It creates the
@@ -115,7 +115,7 @@ controller is the only supported way to change access keys or deploy state;
 there is no plaintext `state.json` or manual inventory step.
 
 The local `nitka` controller keeps the generated ports, REALITY key pair, short ID, access
-key pairs, the deploy SSH key, and encrypted initial SSH credentials under `$HOME/.local/state/xray/`. The
+key pairs, the deploy SSH key, and encrypted initial SSH credentials under `$HOME/.local/state/nitka/`. The
 directory is protected locally and never belongs to the Git worktree. Ansible transfers only the
 rendered files over SSH and does not create a second access-key database on
 the VPS.

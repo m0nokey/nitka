@@ -35,7 +35,7 @@ for index, key in enumerate(keys, 1):
     print(
         f"vless://{key['vision_uuid']}@{node['host']}:{xray['vision_port']}"
         f"?type=tcp&encryption=none&flow=xtls-rprx-vision&security=reality"
-        f"&sni={server_name}&fp=chrome"
+        f"&sni={server_name}&fp=chrome&headerType=none"
         f"&pbk={xray['reality_public_key']}&sid={xray['reality_short_id']}#vless-vision-reality"
     )
     print()

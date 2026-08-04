@@ -84,22 +84,81 @@ select_cascade_node() {
     done
 }
 
+prepare_cascade_transport_state() {
+    local deployment_id="$1" state_file="$2" normalized
+    normalized="$(mktemp "$RUNTIME_TMP_DIR/.cascade-transport-state.XXXXXX")"
+    if python3 "$ROOT_DIR/scripts/state_cli.py" \
+        normalize-cascade-transport "$deployment_id" \
+        <"$state_file" >"$normalized"; then
+        mv -f "$normalized" "$state_file"
+        return 0
+    fi
+    rm -f "$normalized"
+    return 1
+}
+
+import_cascade_routing() {
+    local deployment_id="$1" ingress_node before after routing_file default_routing_file
+    before="$(mktemp)"
+    after="$(mktemp)"
+    if ! read_vault_state "$before"; then
+        rm -f "$before" "$after"
+        return 1
+    fi
+    ingress_node="$(cascade_node "$deployment_id" ingress)"
+    default_routing_file="${NITKA_ROUTING_FILE:-$ROOT_DIR/.local/routing/rules.yml}"
+    printf '%s\n' "Path to the routing/rules.yml file:"
+    printf 'Default: %s\n' "$default_routing_file"
+    if ! read -r -e -p 'Path: ' routing_file; then
+        rm -f "$before" "$after"
+        return 1
+    fi
+    if [[ -z "$routing_file" ]]; then
+        routing_file="$default_routing_file"
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" import-routing \
+        "$ingress_node" "$routing_file" <"$before" >"$after"; then
+        rm -f "$before" "$after"
+        show_result_screen "Routing import failed. The existing Vault was not changed."
+        return 1
+    fi
+    if ! prepare_cascade_transport_state "$deployment_id" "$after"; then
+        rm -f "$before" "$after"
+        show_result_screen "Routing import failed. The existing Vault was not changed."
+        return 1
+    fi
+    if ! run_cascade_ingress_playbook "$deployment_id" "$after" "Updating Cascade routing policy" routing; then
+        rm -f "$before" "$after"
+        show_result_screen "Routing deployment failed. The existing Vault was not changed."
+        return 1
+    fi
+    if ! vault_save "$after"; then
+        rm -f "$before" "$after"
+        show_result_screen "The VPN was updated, but the encrypted Vault could not be saved."
+        return 1
+    fi
+    rm -f "$before" "$after"
+    pipeline_complete "Routing policy imported and deployed successfully." 1
+    return 0
+}
+
 manage_cascade_routing() {
-    local choice
+    local deployment_id="$1" choice
     while true; do
         clear_screen
         menu_heading "Manage routing rules:"
         echo
-        printf '%s\n' "Routing rules management will be added in the next Cascade stage."
-        printf '%s\n' "The current whitelist routing policy remains unchanged."
+        menu_option 1 "Import routing policy"
+        printf '%s\n' "The imported policy is stored in the encrypted Vault."
         echo
         menu_control b back
         menu_control m main
         menu_control i info
         menu_control x exit
         echo
-        if ! read_required_choice choice '?: ' 'b, m, i, or x'; then continue; fi
+        if ! read_required_choice choice '?: ' '1, b, m, i, or x'; then continue; fi
         case "$choice" in
+            1) clear_screen; import_cascade_routing "$deployment_id" || true ;;
             b) return 0 ;;
             m) MAIN_MENU_REQUESTED=1; return 0 ;;
             i) show_info status ;;
@@ -110,14 +169,39 @@ manage_cascade_routing() {
 }
 
 restart_cascade() {
-    local deployment_id="$1" ingress_node egress_node
+    local deployment_id="$1" ingress_node egress_node state
     ingress_node="$(cascade_node "$deployment_id" ingress)"
     egress_node="$(cascade_node "$deployment_id" egress)"
-    if run_node_playbook "$egress_node" restart.yml "" "Restarting Cascade egress" cascade_restart \
-        && run_node_playbook "$ingress_node" restart.yml "" "Restarting Cascade ingress" cascade_restart; then
+    state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-restart.XXXXXX")"
+    if ! read_vault_state "$state"; then
+        rm -f "$state"
+        return 1
+    fi
+    rm -f "$state"
+    if run_node_playbook "$egress_node" restart.yml "" "Restarting Cascade egress" cascade_restart cascade-egress \
+        && run_node_playbook "$ingress_node" restart.yml "" "Restarting Cascade ingress" cascade_restart cascade-ingress; then
         pipeline_complete "Cascade servers restarted successfully." 1
         return 0
     fi
+    return 1
+}
+
+update_cascade() {
+    local deployment_id="$1" state
+    state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-update.XXXXXX")"
+    if ! read_vault_state "$state"; then
+        rm -f "$state"
+        return 1
+    fi
+    pipeline_start "Updating Cascade" update
+    if run_cascade_playbooks "$deployment_id" "$state" \
+        && vault_save "$state"; then
+        rm -f "$state"
+        pipeline_complete "Cascade updated successfully." 1
+        return 0
+    fi
+    rm -f "$state"
+    pipeline_abort
     return 1
 }
 
@@ -177,7 +261,8 @@ manage_cascade_server() {
         menu_option 5 "Block countries"
         menu_option 6 "Rotate SSH key"
         menu_option 7 "Manage routing rules"
-        menu_option 8 "Delete VPN server"
+        menu_option 8 "Update Cascade"
+        menu_option 9 "Delete VPN server"
         echo
         if ! prompt_nav; then continue; fi
         case "$REPLY" in
@@ -192,10 +277,10 @@ manage_cascade_server() {
                 if restart_cascade "$deployment_id"; then :; else pause_result_screen; fi
                 ;;
             4)
-                manage_dns_protection "$(cascade_node "$deployment_id" egress)" || true
+                manage_cascade_dns_protection "$deployment_id" || true
                 ;;
             5)
-                manage_local_region_policy "$(cascade_node "$deployment_id" ingress)" || true
+                manage_cascade_country_policy "$deployment_id" || true
                 ;;
             6)
                 if select_cascade_node "$deployment_id"; then
@@ -203,8 +288,12 @@ manage_cascade_server() {
                     rotate_ssh_key "$CASCADE_SELECTED_NODE" || true
                 fi
                 ;;
-            7) manage_cascade_routing ;;
+            7) manage_cascade_routing "$deployment_id" ;;
             8)
+                clear_screen
+                if update_cascade "$deployment_id"; then :; else pause_result_screen; fi
+                ;;
+            9)
                 remove_cascade "$deployment_id" || removal_status=$?
                 removal_status="${removal_status:-0}"
                 if ((removal_status == NODE_REMOVED_STATUS)); then
@@ -644,24 +733,6 @@ vpn_servers() {
                 x) rm -f "$state"; exit_tui ;;
                 *) invalid_choice; rm -f "$state"; continue ;;
             esac
-        fi
-        if [[ "$item_count" == 1 ]]; then
-            IFS=$'\t' read -r kind name <<<"$items"
-            rm -f "$state"
-            if [[ "$kind" == cascade ]]; then
-                manage_cascade "$name" || true
-            else
-                node_status=0
-                if manage_node "$name"; then
-                    :
-                else
-                    node_status=$?
-                fi
-                if ((node_status == NODE_REMOVED_STATUS)); then
-                    continue
-                fi
-            fi
-            return
         fi
         python3 "$ROOT_DIR/scripts/render_fleet.py" --check <"$state"
         echo

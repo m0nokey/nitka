@@ -5,7 +5,7 @@ services:
     container_name: cascade-ssh-tun-client
     build:
       context: ./ssh_tun_client
-    image: local/ssh-tun-client:latest
+    image: local/cascade-ssh-tun-client:latest
     env_file:
       - ./ssh_tun_client/security.env
     cap_drop:
@@ -39,11 +39,14 @@ services:
     memswap_limit: 128m
     cpus: 0.50
     logging:
-      driver: none
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   clashrs:
     container_name: cascade-clashrs
-    image: local/clash-rs:latest
+    image: local/cascade-clash-rs:latest
     network_mode: "service:ssh_tun_client"
     cap_drop:
       - ALL
@@ -71,11 +74,14 @@ services:
     memswap_limit: 256m
     cpus: 0.50
     logging:
-      driver: none
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   xray:
     container_name: cascade-xray
-    image: local/xray-core:auto
+    image: local/cascade-xray-core:auto
     cap_drop:
       - ALL
     security_opt:
@@ -101,7 +107,10 @@ services:
     memswap_limit: 256m
     cpus: 0.75
     logging:
-      driver: none
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   cascade_ingress:

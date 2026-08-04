@@ -18,7 +18,7 @@ services:
       COLORTERM: ${COLORTERM:-truecolor}
       ANSIBLE_FORCE_COLOR: "true"
       XDG_STATE_HOME: /state
-      NITKA_HOST_STATE_DIR: ${XDG_STATE_HOME:-${HOME}/.local/state}/xray
+      NITKA_HOST_STATE_DIR: ${XDG_STATE_HOME:-${HOME}/.local/state}/nitka
     read_only: true
     cap_drop:
       - ALL
@@ -35,6 +35,6 @@ services:
         target: /workspace
         read_only: true
       - type: bind
-        source: ${XDG_STATE_HOME:-${HOME}/.local/state}/xray
-        target: /state/xray
+        source: ${NITKA_STATE_DIR:-${HOME}/.local/state}/nitka
+        target: /state/nitka
     restart: "no"

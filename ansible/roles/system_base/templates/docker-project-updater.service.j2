@@ -1,5 +1,5 @@
 [Unit]
-Description=Update {{ system_base_docker_updater_name }} Docker stack
+Description=Update {{ system_base_docker_updater_name }} docker stack
 After=network-online.target docker.service
 Wants=network-online.target docker.service
 ConditionPathExists={{ system_base_docker_updater_compose_file }}

@@ -2,12 +2,75 @@
 - name: Restart egress stack
   ansible.builtin.shell: |
     set -uo pipefail
+    stack_change=0
+    recover_previous() {
+      latest=/var/lib/nitka/backup/cascade-egress.latest
+      if [ -s "$latest" ] && [ -d "$(cat "$latest")" ]; then
+        backup_dir="$(cat "$latest")"
+        failed_dir="{{ cascade_egress_remote_dir }}.failed.$$"
+        docker compose -f "{{ cascade_egress_remote_dir }}/compose.yml" down --remove-orphans >/dev/null 2>&1 || true
+        if mv "{{ cascade_egress_remote_dir }}" "$failed_dir" 2>/dev/null; then
+          install -d -m 0755 "{{ cascade_egress_remote_dir }}"
+          if cp -a "$backup_dir/." "{{ cascade_egress_remote_dir }}/"; then
+            rm -rf "$failed_dir"
+            docker compose -f "{{ cascade_egress_remote_dir }}/compose.yml" up -d >/dev/null 2>&1 || true
+            systemctl enable --now cascade-egress-docker-updater.timer cascade-os-updater.timer >/dev/null 2>&1 || true
+            return 0
+          fi
+          rm -rf "{{ cascade_egress_remote_dir }}"
+          mv "$failed_dir" "{{ cascade_egress_remote_dir }}"
+        fi
+      fi
+      docker compose -f "{{ cascade_egress_remote_dir }}/compose.yml" down --remove-orphans >/dev/null 2>&1 || true
+      systemctl disable --now cascade-egress-docker-updater.timer cascade-egress-docker-updater.service >/dev/null 2>&1 || true
+    }
+    on_exit() {
+      rc="$?"
+      if [ "$stack_change" -eq 1 ] && [ "$rc" -ne 0 ]; then
+        recover_previous
+      fi
+      exit "$rc"
+    }
+    trap on_exit EXIT
+    for unit in cascade-egress-docker-updater.timer cascade-egress-docker-updater.service cascade-os-updater.timer cascade-os-updater.service; do
+      systemctl disable --now "$unit" >/dev/null 2>&1 || true
+    done
+    docker compose -f "{{ cascade_egress_remote_dir }}/compose.yml" down --remove-orphans >/dev/null 2>&1 || true
+    for container in cascade-ssh-tun-server cascade-unbound; do
+      if docker inspect "$container" >/dev/null 2>&1; then
+        docker update --restart=no "$container" >/dev/null 2>&1 || true
+        docker stop "$container" >/dev/null 2>&1 || true
+      fi
+    done
+    stack_change=1
     cascade_egress_debug="{{ cascade_egress_debug | default(false) | bool | ternary('1', '0') }}"
     if [ "$cascade_egress_debug" = "1" ]; then
       echo "===== docker compose config ====="
       docker compose config
       echo "===== docker compose up ====="
     fi
+    wait_healthy() {
+      container="$1"
+      timeout="$2"
+      report_failure() {
+        docker inspect -f "$container state={% raw %}{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}{% endraw %}" "$container" 2>/dev/null || true
+        echo "===== $container logs =====" >&2
+        docker logs --tail=200 "$container" 2>&1 || true
+      }
+      end=$((SECONDS + timeout))
+      while [ "$SECONDS" -lt "$end" ]; do
+        status="$(docker inspect -f '{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}{% endraw %}' "$container" 2>/dev/null || true)"
+        [ "$status" = "healthy" ] && return 0
+        [ "$status" = "unhealthy" ] || [ "$status" = "exited" ] || [ "$status" = "dead" ] || {
+          sleep 2
+          continue
+        }
+        report_failure
+        return 1
+      done
+      report_failure
+      return 1
+    }
     build_if_needed() {
       service="$1"
       image="$2"
@@ -27,15 +90,19 @@
         printf '%s\n' "$fingerprint" > "$state_file"
       fi
     }
-    build_if_needed ssh_tun_server local/ssh-tun-server:latest ./ssh_tun_server || exit 1
-    build_if_needed unbound local/unbound:latest ./dns || exit 1
+    build_if_needed ssh_tun_server local/cascade-ssh-tun-server:latest ./ssh_tun_server || exit 1
+    build_if_needed unbound local/cascade-unbound:latest ./dns || exit 1
     docker compose up -d --no-build --remove-orphans
     rc1=$?
+    [ "$rc1" -eq 0 ] || exit 1
+    wait_healthy cascade-ssh-tun-server 120 || exit 1
     if [ "$cascade_egress_debug" = "1" ]; then
       echo "===== docker compose recreate unbound ====="
     fi
     docker compose up -d --force-recreate --no-deps unbound
     rc2=$?
+    [ "$rc2" -eq 0 ] || exit 1
+    wait_healthy cascade-unbound 120 || exit 1
     if [ "$cascade_egress_debug" = "1" ]; then
       echo "===== docker compose ps ====="
       docker compose ps -a || true
@@ -60,6 +127,9 @@
     if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ]; then
       exit 1
     fi
+    stack_change=0
+    systemctl enable --now cascade-egress-docker-updater.timer cascade-os-updater.timer >/dev/null 2>&1 || exit 1
+    trap - EXIT
   args:
     chdir: "{{ cascade_egress_remote_dir }}"
     executable: /bin/bash

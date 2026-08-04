@@ -8,6 +8,8 @@
 {% set xray_proxy_ips = cascade_ingress_xray_reality_proxy_ips | default([]) | unique | list %}
 {% set xray_dns_direct_domains = cascade_ingress_xray_dns_direct_domains | default([]) | unique | list %}
 {% set xray_dns_proxy_domains = cascade_ingress_xray_dns_proxy_domains | default(xray_proxy_domains) | reject('in', xray_dns_direct_domains) | unique | list %}
+{% set xray_dns_egress_only = cascade_ingress_xray_dns_egress_only | default(false) | bool %}
+{% set xray_local_region_countries = cascade_ingress_xray_local_region_countries | default([]) | unique | list %}
 {
   "log": {
     "access": "none",
@@ -22,10 +24,12 @@
       "protocol": "vless",
       "settings": {
         "clients": [
+{% for key in cascade_ingress_xray_access_keys %}
           {
-            "id": "{{ cascade_ingress_xray_xhttp_uuid }}",
-            "email": "xhttp"
-          }
+            "id": "{{ key.xhttp_uuid }}",
+            "email": {{ ('xhttp' if loop.first else (key.key_id | default('xhttp-' ~ loop.index))) | to_json }}
+          }{% if not loop.last %},{% endif %}
+{% endfor %}
         ],
         "decryption": "none"
       },
@@ -67,11 +71,13 @@
       "protocol": "vless",
       "settings": {
         "clients": [
+{% for key in cascade_ingress_xray_access_keys %}
           {
-            "id": "{{ cascade_ingress_xray_reality_uuid }}",
-            "email": "reality",
+            "id": "{{ key.vision_uuid }}",
+            "email": {{ ('reality' if loop.first else (key.key_id | default('reality-' ~ loop.index))) | to_json }},
             "flow": "xtls-rprx-vision"
-          }
+          }{% if not loop.last %},{% endif %}
+{% endfor %}
         ],
         "decryption": "none"
       },
@@ -125,6 +131,14 @@
     "queryStrategy": "UseIPv4",
     "tag": "dns",
     "servers": [
+{% if xray_dns_egress_only %}
+      {
+        "address": "{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}",
+        "port": 53,
+        "skipFallback": true,
+        "finalQuery": true
+      }
+{% else %}
 {% if xray_dns_proxy_domains | length > 0 %}
       {
         "address": "{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}",
@@ -142,6 +156,7 @@
       },
 {% endfor %}
       "https://dns.quad9.net/dns-query"
+{% endif %}
     ]
   },
   "routing": {
@@ -159,15 +174,31 @@
         "port": "853",
         "outboundTag": "blocked"
       },
+{% if xray_block_domains | length > 0 %}
       {
         "type": "field",
         "domain": {{ xray_block_domains | to_json }},
         "outboundTag": "blocked"
       },
+{% endif %}
 {% if xray_block_ips | length > 0 %}
       {
         "type": "field",
         "ip": {{ xray_block_ips | to_json }},
+        "outboundTag": "blocked"
+      },
+{% endif %}
+{% if xray_local_region_countries | length > 0 %}
+{% if 'ru' in xray_local_region_countries %}
+      {
+        "type": "field",
+        "domain": ["domain:ru", "domain:рф", "domain:xn--p1ai"],
+        "outboundTag": "blocked"
+      },
+{% endif %}
+      {
+        "type": "field",
+        "ip": [{% for country in xray_local_region_countries %}"geoip:{{ country }}"{% if not loop.last %}, {% endif %}{% endfor %}],
         "outboundTag": "blocked"
       },
 {% endif %}
@@ -176,12 +207,14 @@
         "ip": ["geoip:private"],
         "outboundTag": "direct"
       },
+{% if xray_reality_direct_domains | length > 0 %}
       {
         "type": "field",
         "inboundTag": ["reality"],
         "domain": {{ xray_reality_direct_domains | to_json }},
         "outboundTag": "direct"
       },
+{% endif %}
 {% if xray_reality_direct_ips | length > 0 %}
       {
         "type": "field",
@@ -190,18 +223,22 @@
         "outboundTag": "direct"
       },
 {% endif %}
+{% if xray_proxy_domains | length > 0 %}
       {
         "type": "field",
         "inboundTag": ["reality"],
         "domain": {{ xray_proxy_domains | to_json }},
         "outboundTag": "proxy"
       },
+{% endif %}
+{% if xray_proxy_ips | length > 0 %}
       {
         "type": "field",
         "inboundTag": ["reality"],
         "ip": {{ xray_proxy_ips | to_json }},
         "outboundTag": "proxy"
       },
+{% endif %}
       {
         "type": "field",
         "inboundTag": ["reality"],
@@ -214,12 +251,14 @@
         "inboundTag": ["reality"],
         "outboundTag": "direct"
       },
+{% if xray_xhttp_direct_domains | length > 0 %}
       {
         "type": "field",
         "inboundTag": ["xhttp"],
         "domain": {{ xray_xhttp_direct_domains | to_json }},
         "outboundTag": "direct"
       },
+{% endif %}
 {% if xray_xhttp_direct_ips | length > 0 %}
       {
         "type": "field",
@@ -228,18 +267,22 @@
         "outboundTag": "direct"
       },
 {% endif %}
+{% if xray_proxy_domains | length > 0 %}
       {
         "type": "field",
         "inboundTag": ["xhttp"],
         "domain": {{ xray_proxy_domains | to_json }},
         "outboundTag": "proxy"
       },
+{% endif %}
+{% if xray_proxy_ips | length > 0 %}
       {
         "type": "field",
         "inboundTag": ["xhttp"],
         "ip": {{ xray_proxy_ips | to_json }},
         "outboundTag": "proxy"
       },
+{% endif %}
       {
         "type": "field",
         "inboundTag": ["xhttp"],

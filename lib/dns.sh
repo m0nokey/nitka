@@ -23,6 +23,7 @@ dns_source_label() {
         hagezi-social) printf '%s' "Social Networks" ;;
         hagezi-safesearch) printf '%s' "SafeSearch" ;;
         hagezi-anti-piracy) printf '%s' "Anti Piracy" ;;
+        cascade-local-ads-tracking) printf '%s' "Local Russian Ads and Tracking" ;;
         *) printf '%s' "$1" ;;
     esac
 }
@@ -50,6 +51,7 @@ dns_source_entries() {
         hagezi-social) printf '%s' 898 ;;
         hagezi-safesearch) printf '%s' 206 ;;
         hagezi-anti-piracy) printf '%s' 36844 ;;
+        cascade-local-ads-tracking) printf '%s' 578 ;;
         *) printf '%s' 0 ;;
     esac
 }
@@ -57,7 +59,7 @@ dns_source_entries() {
 dns_profile_min_vcpus() {
     case "$1" in
         disabled) printf '%s' 0 ;;
-        minimal|optimal|custom) printf '%s' 1 ;;
+        minimal|optimal|security|custom) printf '%s' 1 ;;
         full|maximum) printf '%s' 2 ;;
         *) printf '%s' 99 ;;
     esac
@@ -68,6 +70,7 @@ dns_profile_min_memory() {
         disabled) printf '%s' 0 ;;
         minimal) printf '%s' 1280 ;;
         optimal) printf '%s' 1280 ;;
+        security) printf '%s' 1280 ;;
         full) printf '%s' 1792 ;;
         maximum) printf '%s' 2304 ;;
         custom) printf '%s' 768 ;;
@@ -333,6 +336,9 @@ select_custom_dns_profile() {
         hagezi-gambling-medium hagezi-gambling-full hagezi-social
         hagezi-safesearch hagezi-anti-piracy
     )
+    if [[ "${CASCADE_DNS_MENU:-0}" == 1 ]]; then
+        sources+=(cascade-local-ads-tracking)
+    fi
     if [[ "${DNS_FILTER_CURRENT_PROFILE:-}" == "custom" && -n "${DNS_FILTER_CURRENT_LISTS:-}" ]]; then
         DNS_FILTER_LISTS="$DNS_FILTER_CURRENT_LISTS"
     else
@@ -346,7 +352,7 @@ select_custom_dns_profile() {
         echo
         for index in "${!sources[@]}"; do
             source="${sources[$index]}"
-            if dns_custom_has_source "$source"; then status="ON"; else status="-"; fi
+            if dns_custom_has_source "$source"; then status="ON"; else status="OFF"; fi
             printf '%d. %-48s [%s] %s entries\n' \
                 "$((index + 1))" "$(dns_source_label "$source")" "$status" "$(dns_source_entries "$source")"
         done
@@ -554,6 +560,182 @@ manage_dns_protection() {
     fi
 }
 
+select_cascade_dns_profile() {
+    local choice profile
+    DNS_FILTER_LISTS="${CASCADE_DNS_CURRENT_LISTS:-}"
+    DNS_FILTER_CURRENT_PROFILE="${CASCADE_DNS_CURRENT_PROFILE:-disabled}"
+    DNS_FILTER_CURRENT_LISTS="${CASCADE_DNS_CURRENT_LISTS:-}"
+    while true; do
+        clear_screen
+        menu_heading "Cascade DNS protection"
+        printf '%s\n' "RPZ protection is applied by cascade-unbound on egress."
+        printf '%s\n' "Current profile: ${CASCADE_DNS_CURRENT_PROFILE:-disabled}"
+        echo
+        printf '%s\n' "1. Disabled   No DNS blocking"
+        printf '%s\n' "2. Minimal    Malware protection"
+        printf '%s\n' "3. Security   Malware, phishing and threat feeds"
+        printf '%s\n' "4. Optimal    Malware, phishing and scams"
+        printf '%s\n' "5. Full       Malware, ads and tracking"
+        printf '%s\n' "6. Maximum    Broad protection and DNS bypass"
+        printf '%s\n' "7. Custom     Choose individual RPZ lists"
+        echo
+        if ! prompt_nav '1 2 3 4 5 6 7'; then continue; fi
+        choice="$REPLY"
+        case "$choice" in
+            1)
+                CASCADE_DNS_PROFILE=disabled
+                CASCADE_DNS_LISTS=""
+                unset DNS_FILTER_LISTS DNS_FILTER_CURRENT_PROFILE DNS_FILTER_CURRENT_LISTS
+                return 0
+                ;;
+            2|3|4|5|6)
+                case "$choice" in
+                    2) profile=minimal ;;
+                    3) profile=security ;;
+                    4) profile=optimal ;;
+                    5) profile=full ;;
+                    6) profile=maximum ;;
+                esac
+                if dns_profile_is_available "$profile"; then
+                    CASCADE_DNS_PROFILE="$profile"
+                    CASCADE_DNS_LISTS=""
+                    unset DNS_FILTER_LISTS DNS_FILTER_CURRENT_PROFILE DNS_FILTER_CURRENT_LISTS
+                    return 0
+                fi
+                printf '%s\n' "This profile exceeds the detected egress VPS resources."
+                wait_action_return
+                ;;
+            7)
+                CASCADE_DNS_MENU=1
+                if select_custom_dns_profile; then
+                    unset CASCADE_DNS_MENU
+                    CASCADE_DNS_PROFILE=custom
+                    CASCADE_DNS_LISTS="${DNS_FILTER_LISTS:-}"
+                    unset DNS_FILTER_LISTS DNS_FILTER_CURRENT_PROFILE DNS_FILTER_CURRENT_LISTS
+                    return 0
+                fi
+                unset CASCADE_DNS_MENU
+                [[ "$MAIN_MENU_REQUESTED" == 1 ]] && return 1
+                ;;
+            i) show_info dns ;;
+            b) unset DNS_FILTER_LISTS DNS_FILTER_CURRENT_PROFILE DNS_FILTER_CURRENT_LISTS; return 1 ;;
+            m) MAIN_MENU_REQUESTED=1; unset DNS_FILTER_LISTS DNS_FILTER_CURRENT_PROFILE DNS_FILTER_CURRENT_LISTS; return 1 ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+}
+
+manage_cascade_dns_protection() {
+    local deployment_id="$1" before after current_profile current_lists selected_lists selected_profile
+    local egress_node host user port private_key known_hosts_file
+    before="$(mktemp)"
+    if ! read_vault_state "$before"; then
+        rm -f "$before"
+        return 1
+    fi
+    egress_node="$(cascade_node "$deployment_id" egress)"
+    host="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["host"])' "$egress_node" <"$before")"
+    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_user"])' "$egress_node" <"$before")"
+    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_port"])' "$egress_node" <"$before")"
+    private_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]].get("management_private_key", ""), end="")' "$egress_node" <"$before")"
+    known_hosts_file="$(mktemp /tmp/cascade-egress-known-hosts.XXXXXX)"
+    if [[ -z "$private_key" ]] || ! write_node_known_hosts "$before" "$egress_node" "$known_hosts_file"; then
+        rm -f "$before" "$known_hosts_file"
+        clear_screen
+        printf '%s\n' "The Cascade egress management key or host key is unavailable."
+        wait_action_return
+        return 1
+    fi
+    if ! probe_vps_resources_with_key "$host" "$user" "$port" "$private_key" "$known_hosts_file"; then
+        rm -f "$before" "$known_hosts_file"
+        return 1
+    fi
+    current_profile="$(python3 - "$deployment_id" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+egress = state["deployments"][sys.argv[1]].get("settings", {}).get("egress", {})
+names = [item.get("name") for item in egress.get("rpz_sources", []) if isinstance(item, dict)]
+profile = egress.get("rpz_profile")
+profiles = {
+    "minimal": ["urlhaus"],
+    "optimal": ["urlhaus", "hagezi-tif-mini"],
+    "security": ["urlhaus", "hagezi-tif-mini", "threatfox", "hagezi-dyndns"],
+    "full": ["urlhaus", "hagezi-doh", "adguard-cname-trackers", "adguard-cname-mail", "threatfox", "hagezi-pro-plus", "cascade-local-ads-tracking"],
+    "maximum": ["urlhaus", "hagezi-bypass", "adguard-cname-trackers", "adguard-cname-mail", "threatfox", "hagezi-ultimate", "hagezi-tif-medium", "hagezi-tif-ips", "hagezi-dyndns", "hagezi-spam-tlds", "cascade-local-ads-tracking"],
+}
+if profile in ("disabled", "minimal", "optimal", "security", "full", "maximum", "custom"):
+    print(profile, end="")
+elif not names:
+    print("disabled", end="")
+else:
+    match = next((key for key, values in profiles.items() if names == values), None)
+    print(match or "custom", end="")
+PY
+    )"
+    current_lists="$(python3 - "$deployment_id" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+sources = state["deployments"][sys.argv[1]].get("settings", {}).get("egress", {}).get("rpz_sources", [])
+print(",".join(source.get("name", "") for source in sources if isinstance(source, dict) and source.get("name")), end="")
+PY
+)"
+    CASCADE_DNS_CURRENT_PROFILE="$current_profile"
+    CASCADE_DNS_CURRENT_LISTS="$current_lists"
+    if ! select_cascade_dns_profile; then
+        unset CASCADE_DNS_CURRENT_PROFILE CASCADE_DNS_CURRENT_LISTS
+        rm -f "$before" "$known_hosts_file"
+        return 0
+    fi
+    selected_profile="$CASCADE_DNS_PROFILE"
+    selected_lists="${CASCADE_DNS_LISTS:-}"
+    unset CASCADE_DNS_CURRENT_PROFILE CASCADE_DNS_CURRENT_LISTS CASCADE_DNS_PROFILE CASCADE_DNS_LISTS
+    if [[ "$selected_profile" == custom && "$selected_lists" == "$current_lists" ]] || \
+       [[ "$selected_profile" == "$current_profile" && "$selected_profile" != custom ]]; then
+        show_result_screen "Cascade DNS protection was not changed."
+        rm -f "$before" "$known_hosts_file"
+        return 0
+    fi
+    after="$(mktemp)"
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+        --dns-lists "$selected_lists" set-cascade-dns-profile "$deployment_id" "$selected_profile" \
+        <"$before" >"$after"; then
+        rm -f "$before" "$after" "$known_hosts_file"
+        return 1
+    fi
+    pipeline_start "Updating Cascade DNS protection" dns
+    clear_screen
+    if [[ "$selected_profile" == disabled ]]; then
+        printf '%s\n' "Disabling Cascade DNS protection."
+    else
+        printf '%s\n' "Applying Cascade RPZ protection on egress."
+    fi
+    if ! run_cascade_playbooks "$deployment_id" "$after" egress-only; then
+        rm -f "$before" "$after" "$known_hosts_file"
+        pipeline_abort
+        show_result_screen "Cascade DNS protection failed. The previous stack was restored."
+        return 1
+    fi
+    if ! vault_save "$after"; then
+        if run_cascade_playbooks "$deployment_id" "$before" egress-only; then
+            rm -f "$before" "$after" "$known_hosts_file"
+            pipeline_abort
+            show_result_screen "Vault save failed. Cascade DNS protection was rolled back."
+        else
+            rm -f "$before" "$after" "$known_hosts_file"
+            pipeline_abort
+            show_result_screen "Vault save and automatic Cascade DNS rollback both failed. Check the egress stack."
+        fi
+        return 1
+    fi
+    rm -f "$before" "$after" "$known_hosts_file"
+    pipeline_complete "Cascade DNS protection updated successfully." 1
+}
+
 manage_local_region_policy() {
     local node="$1" before after current_countries selected_countries policy
     before="$(mktemp)"
@@ -629,6 +811,98 @@ manage_local_region_policy() {
         else
             pipeline_complete "Country blocking is now disabled." 1
         fi
+        return 0
+    done
+}
+
+manage_cascade_country_policy() {
+    local deployment_id="$1" before after current_countries selected_countries policy
+    before="$(mktemp)"
+    if ! read_vault_state "$before"; then
+        rm -f "$before"
+        return 1
+    fi
+    current_countries="$(python3 - "$deployment_id" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+countries = state["deployments"][sys.argv[1]].get("settings", {}).get("ingress", {}).get("local_region_countries", [])
+print(",".join(countries), end="")
+PY
+)"
+    LOCAL_REGION_COUNTRIES="$current_countries"
+    while true; do
+        clear_screen
+        menu_heading "Cascade block countries"
+        printf '%s\n' "Selected countries are blocked by cascade-xray on ingress."
+        printf '%s\n' "Current selection: $(local_region_selected_summary)"
+        echo
+        menu_option 1 "Select countries"
+        menu_option 2 "Disable policy"
+        echo
+        if ! prompt_nav; then continue; fi
+        case "$REPLY" in
+            1)
+                if ! select_local_region_countries; then
+                    [[ "$MAIN_MENU_REQUESTED" == 1 ]] && { unset LOCAL_REGION_COUNTRIES; rm -f "$before"; return; }
+                    continue
+                fi
+                ;;
+            2) LOCAL_REGION_COUNTRIES="" ;;
+            i) show_info local_region; continue ;;
+            b) unset LOCAL_REGION_COUNTRIES; rm -f "$before"; return ;;
+            m) MAIN_MENU_REQUESTED=1; unset LOCAL_REGION_COUNTRIES; rm -f "$before"; return ;;
+            x) exit_tui ;;
+            *) invalid_choice; continue ;;
+        esac
+        selected_countries="${LOCAL_REGION_COUNTRIES:-}"
+        if [[ "$selected_countries" == "$current_countries" ]]; then
+            show_result_screen "Cascade country blocking was not changed."
+            unset LOCAL_REGION_COUNTRIES
+            rm -f "$before"
+            return 0
+        fi
+        if [[ -n "$selected_countries" ]]; then policy=enabled; else policy=disabled; fi
+        after="$(mktemp)"
+        if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+            --local-region-countries "$selected_countries" \
+            set-cascade-country-policy "$deployment_id" "$policy" \
+            <"$before" >"$after"; then
+            rm -f "$before" "$after"
+            unset LOCAL_REGION_COUNTRIES
+            return 1
+        fi
+        pipeline_start "Updating Cascade country policy" countries
+        clear_screen
+        if [[ -n "$selected_countries" ]]; then
+            printf '%s\n' "Applying Cascade country blocking on ingress."
+        else
+            printf '%s\n' "Disabling Cascade country blocking."
+        fi
+        if ! run_cascade_playbooks "$deployment_id" "$after" ingress-only; then
+            rm -f "$before" "$after"
+            unset LOCAL_REGION_COUNTRIES
+            pipeline_abort
+            show_result_screen "Cascade country blocking failed. The previous ingress stack was restored."
+            return 1
+        fi
+        if ! vault_save "$after"; then
+            if run_cascade_playbooks "$deployment_id" "$before" ingress-only; then
+                rm -f "$before" "$after"
+                pipeline_abort
+                show_result_screen "Vault save failed. Cascade country blocking was rolled back."
+            else
+                rm -f "$before" "$after"
+                pipeline_abort
+                show_result_screen "Vault save and automatic Cascade country rollback both failed. Check the ingress stack."
+            fi
+            unset LOCAL_REGION_COUNTRIES
+            return 1
+        fi
+        rm -f "$before" "$after"
+        unset LOCAL_REGION_COUNTRIES
+        pipeline_complete "Cascade country blocking updated successfully." 1
         return 0
     done
 }

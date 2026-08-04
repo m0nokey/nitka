@@ -1,15 +1,15 @@
-# nitka
+# Nitka
 
-`nitka` is a simple terminal-based (TUI) manager for your own Xray VPN
-infrastructure.
+`Nitka` is a local CLI orchestration tool that manages VPN infrastructure.
 
 It provides centralized management of deployed VPN servers and their access
 from one interface. You can add VPS nodes, configure them, check their status,
 and issue or revoke VPN access keys without manually editing configuration
 files.
 
-`nitka` is not a VPN client. It manages the servers that user devices
-connect to.
+`nitka` is not a VPN client. It manages the servers that user devices connect
+to. A deployment can be a standalone Xray node or a logical Cascade made from
+an ingress node and an egress node.
 
 The program runs on your macOS or Linux computer inside a Docker container.
 Server data, SSH access, and VPN keys are stored only on your computer in a
@@ -23,13 +23,18 @@ Xray update.
 It helps you:
 
 ```text
-- install an Xray VPN on a VPS
-- create and manage VPN access keys
-- block ads, trackers, and known threats
-- block selected countries on the VPS
-- open an SSH session without remembering the port or password
-- update or delete the VPN server
+- deploy and manage standalone Xray VPN nodes
+- deploy and manage two-server Cascaded VPNs
+- create, rotate, and revoke VPN access keys
+- choose which traffic uses the local or remote country
+- block ads, trackers, malware, phishing, and other threats
+- block selected countries
+- open an SSH session without remembering ports or credentials
+- update, restart, restore, or delete VPN servers
 ```
+
+Public sanitized routing and client examples are documented in
+[EXAMPLES.md](EXAMPLES.md).
 
 > ⚠️ **Security Notice:**<br>
 > Always review any script from the internet before running it on your system!
@@ -203,6 +208,20 @@ the detected VPS CPU and memory resources.
 
 After selecting a profile, wait for the deployment to finish.
 
+### Creating a Cascade
+
+Deploy two ordinary Nitka nodes first. Then open `Add VPN server` and choose
+`Create Cascade VPN`. Select the existing nodes as ingress and egress and
+provide a dedicated external transport port for the egress endpoint. The
+transport port must not be the management/bootstrap SSH port `22` (or any
+other management port). The wizard stores the relationship and transport
+credentials in the encrypted Vault, then deploys ingress and egress with their
+role-specific playbooks.
+
+The controller should have a direct management path to both VPS nodes while a
+Cascade is being changed. Do not make deployment SSH depend on the VPN tunnel
+that the deployment may restart.
+
 During deployment, normal mode shows a short stage-based progress screen:
 
 ```text
@@ -259,8 +278,13 @@ shows only the user-facing progress and result messages.
 
 One instance of `nitka` running in Docker can manage multiple VPS nodes.
 
-Each node has its own connection settings, SSH access, VPN ports, access keys,
-DNS protection settings, and server status.
+Standalone nodes are listed individually. A Cascade is shown as one logical
+entry with two related nodes: `Cascade ingress` is the public client-facing
+Xray endpoint and `Cascade egress` is the remote exit/DNS node.
+
+Each node still has its own management SSH connection, system services, Docker
+project, health status, and rollback backup. The Cascade relationship is stored
+in the Vault and is used to deploy and operate the pair in the correct order.
 
 When the server list is checked, up to 16 nodes are checked concurrently. If
 there are more nodes, the remaining checks wait for an available slot and run
@@ -274,16 +298,42 @@ The server list and status display are shown in the Server Menu below.
 ## How It Works
 
 `nitka` runs in Docker on the user's computer and connects to VPS nodes over
-SSH. Ansible performs the initial server configuration. After deployment, each
-node continues to operate independently.
+management SSH. Ansible performs the initial server configuration and later
+changes. After deployment, each node continues to operate independently.
 
 ```text
-                              CONTROL PLANE
+                         CONTROL PLANE
 
+          +-------------------+
+          | Nitka CLI         |
+          | encrypted Vault   |
+          +---------+---------+
+                    |
+          management SSH / Ansible
+                    v
+          ┌─────────────────────┐
+          │         VPNs        │
+          └─────────────────────┘
+           └────────────────────┘
+            └───────────────────┘
+             └──────────────────┘
+```
+
+Management SSH is the control channel. It must remain independent from the
+VPN transport so a transport restart cannot remove the controller's recovery
+path. Bootstrap SSH (the initial host access, normally port `22`) and the
+dedicated transport port are separate settings and separate keys.
+
+### Standalone Xray node
+
+The original one-node Nitka deployment remains a supported mode. Its basic
+runtime path is:
+
+```text
   +-------------------------+       SSH / Ansible       +-------------------------+
   | User's computer         | ------------------------> | VPS node                |
   |                         |                           |                         |
-  | nitka in Docker      |                           | Debian + Docker Compose |
+  | nitka in Docker         |                           | Debian + Docker Compose |
   | encrypted local Vault   |                           |                         |
   +-------------------------+                           |  +-------------------+  |
                                                         |  | Xray              |  |
@@ -308,13 +358,107 @@ node continues to operate independently.
                                                                   Internet
 ```
 
-Xray and Unbound run as separate services in the same Docker Compose stack.
-Xray handles VPN connections. When DNS protection is enabled, Xray sends DNS
-queries to the private Unbound service. Unbound applies RPZ blocklists and
-forwards allowed queries over DNS-over-TLS.
+Xray and Unbound are separate services in the standalone Docker Compose
+project. When DNS protection is enabled, Xray uses the private Unbound
+service; Unbound applies RPZ lists and forwards allowed queries over
+DNS-over-TLS. The Cascade reuses the same Xray and DNS principles, but moves
+the remote exit and transport server to a separate egress node.
 
-The user's computer does not need to stay powered on. After deployment, the VPS
-continues to run and maintain itself.
+## Cascaded VPN
+
+A Cascade is one logical VPN service made from two VPS roles:
+
+```text
+                  Client
+                    |
+                    v
+    +--------------------------------+
+    | VPS [ingress node]             |   DIRECT by default
+    | local country                  |--------------------> Internet [local exit]
+    | Xray + whitelist routing       |
+    +----------------+---------------+
+                     |
+                     | PROXY whitelist
+                     | SSH TUN transport
+                     v
+    +--------------------------------+
+    | VPS [egress node]              |
+    | remote country                 |--------------------> Internet [remote exit]
+    | SSH TUN server + Unbound DNS   |
+    +----------------+---------------+
+```
+
+The ingress node is the only endpoint exposed to VPN clients. Xray uses
+`DIRECT` by default; the routing policy sends selected domains, IP ranges, or
+ports through the transport SOCKS endpoint. The egress node receives that
+traffic, resolves remote DNS through its private Unbound service, applies the
+selected RPZ protection, and performs the remote Internet exit.
+
+This is not a full-tunnel requirement. The important property is that the
+ingress policy decides which traffic needs the egress country. Ordinary traffic
+can remain on the ingress/local path, while selected traffic gets the second
+hop.
+
+The user's computer does not need to stay powered on. After deployment, both
+VPS nodes continue to run and maintain themselves.
+
+## Transport Architecture
+
+The Cascade is split into stable layers so a transport can be replaced without
+rewriting Xray routing, DNS protection, access-key management, or system
+hardening:
+
+```text
+  system_base       Debian, Docker, management SSH, timers, updater, rollback
+        |
+  cascade_ingress  Xray, routing policy, client-side transport endpoint
+  cascade_egress   remote DNS, RPZ, server-side transport endpoint
+        |
+  transport         client endpoint <-> server endpoint
+```
+
+The current transport is SSH TUN:
+
+```text
+ansible/roles/transports/
+  access/
+    xray/       current client-facing access adapter
+  backhaul/
+    ssh_tun/    current ingress-to-egress adapter
+```
+
+The concrete implementation files remain in the existing
+`cascade_ssh_tun`, `cascade_ingress`, and `xray` roles. The `transports/`
+tree is the stable extension boundary; it prevents future transport code from
+being mixed into topology orchestration.
+
+Future transports such as Naive or Hysteria2 should implement the same
+transport contract rather than duplicate the surrounding stack:
+
+1. Define an ingress/client endpoint and an egress/server endpoint.
+2. Keep transport credentials, host keys, and fingerprints in the encrypted
+   Vault; never use the management key as a transport key.
+3. Provide its Dockerfile, runtime configuration, healthcheck, and Compose
+   service definition.
+4. Expose one stable internal endpoint to the Xray/routing layer.
+5. Provide an updater dependency chain and a restart/healthcheck procedure.
+6. Support deployment snapshots and rollback before the endpoint is cut over.
+
+The transport-specific implementation may change; the following layers should
+not need to know whether the transport is SSH TUN, Naive, Hysteria2, or another
+future implementation:
+
+- Xray inbounds and access keys;
+- routing and country policy;
+- egress Unbound and RPZ profiles;
+- management/bootstrap SSH;
+- systemd updater timers and deployment rollback.
+
+The role `cascade_ssh_tun` is therefore the first concrete backhaul adapter.
+When additional transports are introduced, they should use a parallel adapter
+under `ansible/roles/transports/access/` or `ansible/roles/transports/backhaul/`,
+selected by deployment state, while preserving the same ingress/egress
+lifecycle and health contract.
 
 ## Main Menu
 
@@ -331,6 +475,17 @@ x. exit
 Use `i` to see help for the current screen. Use `b` to go back, `m` to return
 to the main menu, and `x` to exit.
 
+`Add VPN server` opens a second screen:
+
+```text
+1. Add standalone Xray server
+2. Create Cascade VPN
+```
+
+The Cascade wizard selects two already deployed nodes and assigns their roles:
+the ingress node receives client connections, and the egress node provides the
+transport exit and remote DNS.
+
 ## Server Menu
 
 The VPS list shows the important information at a glance:
@@ -338,22 +493,18 @@ The VPS list shows the important information at a glance:
 ```text
   Node Management:
 
-  Fleet status: 4 Active, 1 Partial
+     IP              STATUS   COUNTRY   CREATED      MODE              PROVIDER
 
-     IP              STATUS   COUNTRY   CREATED      PROVIDER
-
-  1. 203.0.113.42   Active   DE        2026-07-27   Hetzner Online GmbH
-  2. 198.51.100.17  Active   US        2026-07-26   Amazon Technologies Inc.
-  3. 192.0.2.24     Active   NL        2026-07-25   DigitalOcean, LLC
-  4. 203.0.113.88   Active   GB        2026-07-24   Google LLC
-  5. 198.51.100.64  Partial  SG        2026-07-23   Vultr Holdings LLC
+  1. 203.0.113.42    Active   RU        2026-05-05   Cascade ingress   Example Provider
+  └─ 198.51.100.17   Active   DE        2026-05-05   Cascade egress    Example Provider
+  2. 203.0.113.10    Active   NL        2026-05-06   Xray              Example Provider
+  3. 203.0.113.11    Active   DE        2026-05-06   Xray              Example Provider
 ```
 
-The terminal uses color for quick scanning: `Active` is green, `Partial` is
-yellow, and unavailable states are red. In this example, four nodes are fully
-operational and the Singapore node has a degraded VPN status: Xray is running,
-but only one of its VPN ports is reachable. The IP addresses above use
-documentation-only ranges and are examples rather than real servers.
+The Cascade is one selectable logical entry. Its second line is the egress
+child, not a second independent VPN. The terminal uses color for quick
+scanning: `Active` is green, `Partial` is yellow, and unavailable states are
+red. The example documentation addresses and provider names are illustrative.
 
 After selecting a VPS:
 
@@ -381,6 +532,10 @@ x. exit
 ```
 
 `Open SSH session` uses the saved management key and port from the Vault.
+For a Cascade, operations that affect the transport or remote DNS are applied
+to the appropriate node: ingress routing changes stay on ingress, while DNS
+protection changes stay on egress. The controller keeps a deployment snapshot
+and restores the last healthy stack if a cutover healthcheck fails.
 
 ### VPN Status
 
@@ -393,12 +548,26 @@ Unreachable      No VPN or management port responded.
 
 ## Autonomous Operation And Updates
 
-After deployment, independent system services are installed on the VPS. They:
+After deployment, independent system services are installed on each VPS. They:
 
-- update Debian and the Docker/Xray stack every night;
+- update Debian and the node's Docker stack every night;
 - reboot the VPS when a kernel update requires it;
 - check the stack after an update;
-- restore the previous working Xray version if an update fails.
+- restore the previous working stack if an update fails.
+
+Cascade nodes use distinct service names:
+
+```text
+cascade-os-updater.timer
+cascade-ingress-docker-updater.timer
+cascade-egress-docker-updater.timer
+cascade-ingress-watchdog.timer
+```
+
+The ingress watchdog protects the Docker namespace that depends on the
+transport client. Egress uses the updater and Compose healthchecks for its
+transport server and Unbound stack. Management SSH is kept outside the
+transport path so these services can be repaired from the control machine.
 
 Both the server and client parts of Xray should be kept up to date. New versions
 fix vulnerabilities, improve compatibility, and reduce the chance that outdated
@@ -517,7 +686,7 @@ controller communicates with a VPS.
 The Vault is stored at:
 
 ```text
-$HOME/.local/state/xray/vault.json
+$HOME/.local/state/nitka/vault.json
 ```
 
 The Vault password is not stored on the VPS and cannot be recovered from the
@@ -540,7 +709,7 @@ until a valid backup is restored.
 The complete local structure is:
 
 ```text
-$HOME/.local/state/xray/
+$HOME/.local/state/nitka/
 ├── vault.json
 └── backups/
     ├── user/     user-created encrypted archives
@@ -555,7 +724,7 @@ Use a user backup when moving the Vault to another computer.
 2. Copy the created `vault-*.tar.gz` file to this directory on the new computer:
 
 ```text
-$HOME/.local/state/xray/backups/user/
+$HOME/.local/state/nitka/backups/user/
 ```
 
 3. Start nitka and choose `Vault` and `Restore encrypted state`.
@@ -563,7 +732,7 @@ $HOME/.local/state/xray/backups/user/
 
 Create the `backups/user` directory first if it does not exist. The Vault does not
 need to be initialized before restoring a backup. With the Docker launcher,
-`/state/xray` is the path inside the container; the host path above is the
+`/state/nitka` is the path inside the container; the host path above is the
 directory to use for copying files. The password is not included in the
 backup and must be remembered separately.
 
@@ -571,17 +740,17 @@ The `.local` directory is hidden in most file managers. Use the terminal to
 copy the backup to a visible folder before transferring it:
 
 ```bash
-ls -lh "$HOME/.local/state/xray/backups/user/"
-cp "$HOME/.local/state/xray/backups/user"/vault-*.tar.gz "$HOME/Downloads/"
+ls -lh "$HOME/.local/state/nitka/backups/user/"
+cp "$HOME/.local/state/nitka/backups/user"/vault-*.tar.gz "$HOME/Downloads/"
 ```
 
 After copying the file to the new computer, place it into the Vault backup
 directory:
 
 ```bash
-mkdir -p "$HOME/.local/state/xray/backups/user"
-cp "$HOME/Downloads"/vault-*.tar.gz "$HOME/.local/state/xray/backups/user/"
-chmod 600 "$HOME/.local/state/xray/backups/user"/vault-*.tar.gz
+mkdir -p "$HOME/.local/state/nitka/backups/user"
+cp "$HOME/Downloads"/vault-*.tar.gz "$HOME/.local/state/nitka/backups/user/"
+chmod 600 "$HOME/.local/state/nitka/backups/user"/vault-*.tar.gz
 ```
 
 Then start nitka, open `Vault`, choose `Restore encrypted state`, and select
@@ -600,7 +769,7 @@ the local image without interrupting the VPN on the VPS.
 Do not delete the local state directory:
 
 ```text
-$HOME/.local/state/xray/
+$HOME/.local/state/nitka/
 ```
 
 This directory contains the encrypted Vault with the infrastructure state.
@@ -675,16 +844,17 @@ the detailed assumptions and accepted risks.
 
 ## Technical Overview
 
-The VPS runs:
+A standalone Xray node runs:
 
 ```text
 - VLESS TCP with Vision and REALITY
 - VLESS XHTTP with REALITY in packet-up mode
 ```
 
-When protection is enabled, Xray sends DNS requests through the private
-Unbound container. Unbound uses DNS-over-TLS upstreams and blocklists. Blocked
-domain names return `NXDOMAIN`.
+In a Cascade, ingress runs the Xray client-facing stack and egress runs the
+transport server plus Unbound. Xray routing selects `DIRECT` or the internal
+transport SOCKS endpoint. Egress Unbound uses configured encrypted upstreams
+and optional RPZ blocklists; blocked domain names return `NXDOMAIN`.
 
 The local Vault is the source of truth for VPS access and VPN keys. No
 separate key database is created on the VPS.
@@ -711,8 +881,25 @@ separate key database is created on the VPS.
 │   node management, deployment, DNS, security, access keys, and pipelines.
 │
 ├── ansible/
-│   VPS playbooks and roles for Debian setup, SSH hardening, Docker,
-│   Xray deployment, updates, rollback, restart, and server removal.
+│   ├── cascade_ingress.yml       # Cascade ingress deployment
+│   ├── cascade_egress.yml        # Cascade egress deployment
+│   ├── site.yml                  # standalone Xray deployment
+│   ├── bootstrap.yml             # initial host access
+│   ├── management_access.yml     # management SSH access
+│   ├── harden_ssh.yml            # SSH hardening with rollback protection
+│   ├── rollback_cascade_*.yml    # remote stack rollback playbooks
+│   └── roles/
+│       ├── system_base/          # Debian, Docker, SSH, timers, updates
+│       ├── xray/                 # standalone Xray node
+│       ├── cascade_ingress/      # Cascade Xray/routing stack
+│       ├── cascade_egress/       # Cascade Unbound/RPZ stack
+│       ├── cascade_ssh_tun/      # current transport implementation
+│       ├── transports/            # access/backhaul adapter boundaries
+│       └── topologies/            # standalone/cascade topology boundaries
+│
+├── examples/
+│   ├── clients/shadowrocket/     # supported iOS/macOS client format
+│   └── routing/xray/             # public Xray routing example contract
 │
 ├── scripts/
 │   Python helpers for encrypted state validation, node rendering,

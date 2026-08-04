@@ -31,6 +31,20 @@ wait_shared_port() {
     return 1
 }
 
+wait_host_port() {
+    host="$1"
+    port="$2"
+    timeout="$3"
+    end=$((SECONDS + timeout))
+    while [ "$SECONDS" -lt "$end" ]; do
+        if timeout 2 bash -c "</dev/tcp/${host}/${port}" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
 build_if_needed() {
     service="$1"
     image="$2"
@@ -119,14 +133,14 @@ if [ "$cascade_ingress_debug" = "1" ]; then
     echo "===== docker compose up ====="
 fi
 
-build_if_needed ssh_tun_client local/ssh-tun-client:latest ./ssh_tun_client || exit 1
-resolve_release_image clashrs Watfaq/clash-rs 'ghcr.io/watfaq/clash-rs:latest' local/clash-rs:latest || exit 1
-resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:latest' local/xray-core:auto || exit 1
+build_if_needed ssh_tun_client local/cascade-ssh-tun-client:latest ./ssh_tun_client || exit 1
+resolve_release_image clashrs Watfaq/clash-rs 'ghcr.io/watfaq/clash-rs:latest' local/cascade-clash-rs:latest || exit 1
+resolve_release_image xray XTLS/Xray-core 'ghcr.io/xtls/xray-core:latest' local/cascade-xray-core:auto || exit 1
 
 validate_reality_target() {
     target={{ cascade_ingress_xray_obfs_host | quote }}
     echo "validating REALITY target ${target}"
-    docker run --rm --network host local/xray-core:auto tls ping "$target" || {
+    docker run --rm --network host local/cascade-xray-core:auto tls ping "$target" || {
         echo "REALITY target validation failed: ${target}" >&2
         return 1
     }
@@ -155,6 +169,8 @@ if ! start_clash; then
 fi
 
 docker compose up -d --force-recreate --no-deps xray || exit 1
+wait_host_port 127.0.0.1 {{ cascade_ingress_xray_xhttp_port }} 45 || exit 1
+wait_host_port 127.0.0.1 {{ cascade_ingress_xray_reality_port }} 45 || exit 1
 rc=0
 
 if [ "$cascade_ingress_debug" = "1" ]; then

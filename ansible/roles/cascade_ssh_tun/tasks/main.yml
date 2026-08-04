@@ -8,7 +8,10 @@
   changed_when: false
 
 - name: Ensure SSH TUN keypair exists on control host
-  ansible.builtin.include_tasks: keypair.yml
+  ansible.builtin.include_tasks:
+    file: keypair.yml
+    apply:
+      become: false
 
 - name: Configure SSH TUN client endpoint
   ansible.builtin.include_tasks: client.yml

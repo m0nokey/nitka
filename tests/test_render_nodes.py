@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.render_nodes import connectivity_lines, firewall_hint
+from scripts.render_nodes import connectivity_lines, firewall_hint, service_probe_command
 
 
 class NodeConnectivityTests(unittest.TestCase):
@@ -38,6 +38,21 @@ class NodeConnectivityTests(unittest.TestCase):
         diagnostics = self.diagnostics([(38642, True), (49753, False)])
 
         self.assertFalse(firewall_hint(diagnostics))
+
+    def test_cascade_ingress_probe_uses_cascade_container_name(self):
+        command = service_probe_command({"role": "ingress"})
+
+        self.assertIn("cascade-xray", command)
+        self.assertIn("nitka-xray", command)
+        self.assertIn("for entry in $running_containers", command)
+        self.assertIn("docker ps -a", command)
+        self.assertIn("service-running", command)
+
+    def test_cascade_egress_probe_uses_ssh_tun_container_name(self):
+        command = service_probe_command({"role": "egress"})
+
+        self.assertIn("cascade-ssh-tun-server", command)
+        self.assertIn("nitka-ssh-tun-server", command)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ system_base_manage_debian_repo: true
 system_base_sources_list_backup: /var/lib/nitka/backup/sources.list
 system_base_timezone: UTC
 system_base_enable_os_updater: true
+system_base_os_updater_name: nitka
 system_base_enable_docker_updater: true
 system_base_docker_updater_name: xray
 system_base_docker_updater_compose_file: /opt/xray/compose.yml
@@ -15,6 +16,7 @@ system_base_docker_updater_randomized_delay_sec: 7m
 system_base_docker_updater_timeout: 30m
 system_base_docker_updater_health_timeout: 120
 system_base_docker_updater_prune_builder_until: 24h
+system_base_docker_updater_services: []
 system_base_ssh_rollback_unit: nitka-ssh-rollback
 system_base_ssh_rollback_delay: 2min
 system_base_ssh_config_backup: /var/lib/nitka/backup/sshd_config
@@ -22,6 +24,7 @@ system_base_ssh_host_key_marker: /etc/ssh/.nitka-ed25519-host-key
 system_base_ssh_host_keys_backup_dir: /var/lib/nitka/ssh-host-keys
 system_base_ssh_host_keys_backup_marker: /var/lib/nitka/.ssh-host-keys-backed-up
 system_base_harden_ssh_initial_user: root
+system_base_harden_ssh_preserve_users: []
 system_base_harden_ssh_preferred_kex:
   - mlkem768x25519-sha256
   - sntrup761x25519-sha512

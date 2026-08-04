@@ -1,0 +1,28 @@
+---
+- name: Prepare Cascade ingress management access
+  hosts: cascade_ingress
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Prepare ingress management access
+      ansible.builtin.include_role:
+        name: system_base
+        tasks_from: management_access
+      vars:
+        system_base_deploy_authorized_key: "{{ cascade_ingress_deploy_authorized_key }}"
+        system_base_harden_ssh_initial_user: "{{ cascade_ingress_harden_ssh_initial_user }}"
+        system_base_harden_ssh_preserve_users: "{{ cascade_ingress_harden_ssh_preserve_users }}"
+
+- name: Prepare Cascade egress management access
+  hosts: cascade_egress
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Prepare egress management access
+      ansible.builtin.include_role:
+        name: system_base
+        tasks_from: management_access
+      vars:
+        system_base_deploy_authorized_key: "{{ cascade_egress_deploy_authorized_key }}"
+        system_base_harden_ssh_initial_user: "{{ cascade_egress_harden_ssh_initial_user }}"
+        system_base_harden_ssh_preserve_users: "{{ cascade_egress_harden_ssh_preserve_users }}"

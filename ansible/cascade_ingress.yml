@@ -3,13 +3,60 @@
   hosts: cascade_ingress
   become: true
   gather_facts: true
+  force_handlers: true
+  pre_tasks:
+    - name: Snapshot current Cascade ingress stack before deployment
+      ansible.builtin.shell: |
+        set -eu
+        source_dir="{{ cascade_ingress_remote_dir }}"
+        backup_root="/var/lib/nitka/backup/cascade-ingress"
+        latest="$backup_root.latest"
+        if [ -f "$source_dir/compose.yml" ]; then
+          backup="$backup_root.$(date -u +%Y%m%dT%H%M%SZ)"
+          install -d -m 0700 "$backup"
+          cp -a "$source_dir/." "$backup/"
+          printf '%s\n' "$backup" > "$latest"
+          chmod 0600 "$latest"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      no_log: true
   roles:
     - role: system_base
       vars:
         system_base_deploy_authorized_key: "{{ cascade_ingress_deploy_authorized_key }}"
+        system_base_harden_ssh_initial_user: "{{ cascade_ingress_harden_ssh_initial_user }}"
+        system_base_harden_ssh_preserve_users: "{{ cascade_ingress_harden_ssh_preserve_users }}"
+        system_base_os_updater_name: cascade
+        system_base_enable_docker_updater: true
         system_base_docker_updater_name: "{{ cascade_ingress_updater_name | default('cascade-ingress') }}"
+        system_base_docker_updater_calendar: "*-*-* 02:20"
         system_base_docker_updater_compose_file: "{{ cascade_ingress_remote_dir }}/compose.yml"
+        system_base_docker_updater_services:
+          - service: ssh_tun_client
+            container: cascade-ssh-tun-client
+            image_type: build
+            base_image: alpine:3.23
+            cascade_restart:
+              - clashrs
+              - xray
+          - service: clashrs
+            container: cascade-clashrs
+            image_type: external
+            image: local/cascade-clash-rs:latest
+            release_repo: Watfaq/clash-rs
+            release_image_template: ghcr.io/watfaq/clash-rs:latest
+            cascade_restart:
+              - xray
+          - service: xray
+            container: cascade-xray
+            image_type: external
+            image: local/cascade-xray-core:auto
+            release_repo: XTLS/Xray-core
+            release_image_template: ghcr.io/xtls/xray-core:latest
     - role: cascade_ssh_tun
       vars:
         cascade_ssh_tun_endpoint: client
+      when: cascade_ingress_manage_ssh_tun | default(true) | bool
     - role: cascade_ingress

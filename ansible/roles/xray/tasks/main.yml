@@ -1,4 +1,23 @@
 ---
+- name: Snapshot current Xray stack before deployment
+  become: true
+  ansible.builtin.shell: |
+    set -eu
+    source_dir="{{ xray_dir }}"
+    backup_root="/var/lib/nitka/backup/xray"
+    latest="$backup_root.latest"
+    if [ -f "$source_dir/compose.yml" ]; then
+      backup="$backup_root.$(date -u +%Y%m%dT%H%M%SZ)"
+      install -d -m 0700 "$backup"
+      cp -a "$source_dir/." "$backup/"
+      printf '%s\n' "$backup" > "$latest"
+      chmod 0600 "$latest"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: true
+
 - name: Validate local encrypted runtime state
   ansible.builtin.assert:
     that:

@@ -244,6 +244,7 @@ pipeline_stage_for_playbook() {
     done
     case "$playbook" in
         bootstrap.yml) pipeline_stage 30 'Preparing VPS access' ;;
+        management_access.yml) pipeline_stage 20 'Checking SSH access' ;;
         harden_ssh.yml) pipeline_stage 40 'Hardening SSH access' ;;
         site.yml)
             case "$PIPELINE_OPERATION" in

@@ -3,6 +3,7 @@
   hosts: xray_nodes
   become: true
   gather_facts: false
+  force_handlers: true
   pre_tasks:
     - name: Wait for initial SSH access
       ansible.builtin.wait_for_connection:

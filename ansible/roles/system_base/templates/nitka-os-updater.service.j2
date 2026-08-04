@@ -1,11 +1,12 @@
 [Unit]
-Description=Safe unattended apt dist-upgrade for Nitka
+Description=Safe unattended apt dist-upgrade (kernel-aware)
+Documentation=man:apt-get(8)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/nitka-os-updater
+ExecStart=/bin/bash /usr/local/sbin/{{ system_base_os_updater_name }}-os-updater
 Nice=10
 TimeoutStartSec=2h
 Environment=DEBIAN_FRONTEND=noninteractive

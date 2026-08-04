@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 mutate_access_keys_and_deploy() {
-    local node="$1" action="$2" key_id="${3:-}" before after success_message
+    local node="$1" action="$2" key_id="${3:-}" before after success_message cascade_id rollback_rc
     before="$(mktemp)"
     after="$(mktemp)"
     if ! read_vault_state "$before"; then
@@ -19,15 +19,33 @@ mutate_access_keys_and_deploy() {
             return 1
         }
     fi
-    if ! run_node_playbook "$node" site.yml "$after" "Updating access keys" access_keys; then
+    cascade_id="$(cascade_deployment_for_node "$node" "$before")"
+    if [[ -n "$cascade_id" ]]; then
+        if ! run_cascade_ingress_playbook "$cascade_id" "$after" "Updating Cascade access keys" access_keys; then
+            rm -f "$before" "$after"
+            printf '%s\n' "Access key change failed. The existing Vault was not changed."
+            return 1
+        fi
+    elif ! run_node_playbook "$node" site.yml "$after" "Updating access keys" access_keys; then
         rm -f "$before" "$after"
         printf '%s\n' "Access key change failed. The existing Vault was not changed."
         return 1
     fi
     if ! vault_save "$after"; then
+        rollback_rc=0
+        if [[ -n "$cascade_id" ]]; then
+            run_cascade_ingress_playbook "$cascade_id" "$before" "Rolling back access key change" access_keys_rollback || rollback_rc=1
+        else
+            run_node_playbook "$node" site.yml "$before" "Rolling back access key change" access_keys_rollback || rollback_rc=1
+        fi
         rm -f "$before" "$after"
         pipeline_abort
-        printf '%s\n' "The VPN was updated, but the encrypted Vault could not be saved."
+        if ((rollback_rc != 0)); then
+            printf '%s\n' "Access key change failed and automatic rollback also failed. Runtime state must be checked before retrying."
+            printf '%s\n' "The existing Vault was not changed."
+            return 2
+        fi
+        printf '%s\n' "Access key change was rolled back because the encrypted Vault could not be saved."
         printf '%s\n' "The existing Vault was not changed."
         return 1
     fi

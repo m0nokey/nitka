@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 COUNTRIES_FILE="$ROOT_DIR/data/countries.tsv"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/xray"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nitka"
 VAULT_FILE="$STATE_DIR/vault.json"
 HOST_STATE_DIR="${NITKA_HOST_STATE_DIR:-$STATE_DIR}"
 HOST_VAULT_FILE="$HOST_STATE_DIR/vault.json"

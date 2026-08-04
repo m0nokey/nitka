@@ -649,6 +649,7 @@ restore_vault() {
     VAULT_PASSWORD_FILE=""
     show_result_screen "Encrypted Vault restored."
 }
+
 secure_state() {
     while true; do
         clear_screen

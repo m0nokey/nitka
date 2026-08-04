@@ -26,12 +26,9 @@ def node_status(node, diagnostics=None):
 
 
 def cascade_node_diagnostics(role, node):
-    diagnostics = node_diagnostics(node)
-    if role == "egress":
-        diagnostics["status"] = (
-            "Active" if diagnostics["management"].get("ssh") == "connected" else "Unreachable"
-        )
-    return diagnostics
+    probe_node = dict(node)
+    probe_node["role"] = role
+    return node_diagnostics(probe_node)
 
 
 def deployment_data(state, deployment_id):
@@ -50,6 +47,16 @@ def deployment_data(state, deployment_id):
     return result
 
 
+def format_table(headers, rows, indent="  "):
+    values = [tuple(str(value) for value in headers)]
+    values.extend(tuple(str(value) for value in row) for row in rows)
+    widths = [max(len(row[index]) for row in values) for index in range(len(headers))]
+    return [
+        indent + "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
+        for row in values
+    ]
+
+
 def render(state, deployment_id, diagnostics=None):
     rows = deployment_data(state, deployment_id)
     statuses = [node_status(node, diagnostics) for _, node in rows]
@@ -63,11 +70,11 @@ def render(state, deployment_id, diagnostics=None):
         f"Connectivity: {connectivity}"
     )
     print()
-    print("   ROLE      IP              STATUS   COUNTRY   CREATED      MODE              PROVIDER")
-    print()
+    table_rows = []
     for index, (role, node) in enumerate(rows, 1):
         mode = node.get("mode") or ("Xray" if role == "ingress" else "SSH TUN + DNS")
-        values = (
+        table_rows.append((
+            f"{index}.",
             role,
             node.get("host", "N/A"),
             node_status(node, diagnostics),
@@ -75,11 +82,12 @@ def render(state, deployment_id, diagnostics=None):
             date_value(node.get("created_at")),
             mode,
             node.get("provider", "N/A"),
-        )
-        print(
-            f"  {index}. {values[0]:<9} {values[1]:<15} {values[2]:<8} "
-            f"{values[3]:<9} {values[4]:<12} {values[5]:<17} {values[6]}"
-        )
+        ))
+    for line in format_table(
+        ("", "ROLE", "IP", "STATUS", "COUNTRY", "CREATED", "MODE", "PROVIDER"),
+        table_rows,
+    ):
+        print(line)
 
 
 def main():

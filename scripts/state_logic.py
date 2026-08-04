@@ -7,6 +7,110 @@ PORT_MODE_MANUAL = "manual"
 VISION_PORT = 443
 
 
+def _validated_port(value, label):
+    if value is None or value == "":
+        return None
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a valid port") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError(f"{label} must be between 1 and 65535")
+    return port
+
+
+def _port_entry(external, internal, source, internal_source=None):
+    entry = {
+        "external": _validated_port(external, "external port"),
+        "internal": _validated_port(internal, "internal port"),
+        "source": source,
+    }
+    entry["external_status"] = "known" if entry["external"] is not None else "not_recorded"
+    if entry["internal"] is None:
+        entry["internal_status"] = "not_recorded"
+    elif internal_source == "inferred":
+        entry["internal_status"] = "inferred"
+    else:
+        entry["internal_status"] = "known"
+    if internal_source:
+        entry["internal_source"] = internal_source
+    return entry
+
+
+def build_port_mapping(
+    bootstrap_external=None,
+    management_external=None,
+    sshd_internal=None,
+    services=None,
+    *,
+    bootstrap_internal=None,
+    source="state",
+    internal_source="recorded",
+):
+    """Build the common external-to-internal port model for every node.
+
+    NAT here means detected port translation, not the mere existence of a
+    private provider network. Missing values stay unknown instead of guessed.
+    """
+    bootstrap_external = _validated_port(bootstrap_external, "bootstrap external port")
+    management_external = _validated_port(
+        management_external, "management external port"
+    )
+    sshd_internal = _validated_port(sshd_internal, "sshd internal port")
+    if management_external is None:
+        management_external = bootstrap_external
+    if bootstrap_internal is None and sshd_internal is not None:
+        bootstrap_internal = sshd_internal
+
+    if management_external is None or sshd_internal is None:
+        nat = {
+            "enabled": None,
+            "detection": "unknown",
+            "confidence": "none",
+            "reason": "external management port or internal sshd port is not recorded",
+        }
+    elif management_external != sshd_internal:
+        nat = {
+            "enabled": True,
+            "detection": "derived",
+            "confidence": "high",
+            "reason": (
+                f"management external port {management_external} differs from "
+                f"sshd internal port {sshd_internal}"
+            ),
+        }
+    else:
+        nat = {
+            "enabled": False,
+            "detection": "derived",
+            "confidence": "high",
+            "reason": "no SSH port translation detected",
+        }
+
+    ports = {
+        "bootstrap_ssh": _port_entry(
+            bootstrap_external,
+            bootstrap_internal,
+            source,
+            internal_source if bootstrap_internal is not None else None,
+        ),
+        "management_ssh": _port_entry(
+            management_external,
+            sshd_internal,
+            source,
+            internal_source if sshd_internal is not None else None,
+        ),
+    }
+    for service, internal in (services or {}).items():
+        ports[service] = _port_entry(
+            None,
+            internal,
+            source,
+            "recorded" if internal is not None else None,
+        )
+    return {"nat": nat, "ports": ports}
+
+
 def bot_port_pattern(port):
     value = str(port)
     if any(value[index] == value[index + 1] for index in range(len(value) - 1)):

@@ -85,31 +85,36 @@
       SSH hardening requires a generated non-default SSH port; refusing to keep
       port 22.
 
-- name: Detect initial SSH user primary group
+- name: Detect SSH access user primary groups
   ansible.builtin.command:
     argv:
       - id
       - -gn
-      - "{{ system_base_harden_ssh_initial_user }}"
-  register: system_base_initial_ssh_group
+      - "{{ item }}"
+  loop: >-
+    {{ ([system_base_harden_ssh_initial_user] + system_base_harden_ssh_preserve_users)
+       | unique
+       | reject('in', ['root', system_base_deploy_user])
+       | list }}
+  register: system_base_ssh_user_groups
   changed_when: false
   failed_when: false
+  loop_control:
+    label: "{{ item }}"
 
 - name: Build SSH AllowGroups
   ansible.builtin.set_fact:
     system_base_harden_ssh_allow_groups: >-
       {{
-        system_base_deploy_user
-        ~ (
-          (' ' ~ system_base_initial_ssh_group.stdout)
-          if system_base_harden_ssh_initial_user != 'root'
-             and (
-               system_base_initial_ssh_group.stdout
-               | default('') | length > 0
-             )
-             and system_base_initial_ssh_group.stdout != system_base_deploy_user
-          else ''
-        )
+        ([system_base_deploy_user] +
+         (system_base_ssh_user_groups.results
+          | selectattr('rc', 'equalto', 0)
+          | map(attribute='stdout')
+          | map('trim')
+          | reject('equalto', '')
+          | list))
+        | unique
+        | join(' ')
       }}
 
 - name: Detect controller SSH KEX algorithms
@@ -195,6 +200,10 @@
     set -euo pipefail
     rollback_command="cp -a {{ system_base_ssh_config_backup }}"
     rollback_command+=" /etc/ssh/sshd_config"
+    rollback_command+=" && if [ -d {{ system_base_ssh_host_keys_backup_dir | quote }} ]; then"
+    rollback_command+=" find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*' -delete"
+    rollback_command+=" && cp -a {{ system_base_ssh_host_keys_backup_dir | quote }}/. /etc/ssh/"
+    rollback_command+="; fi"
     rollback_command+=" && (systemctl reload ssh || systemctl reload sshd)"
     systemd-run \
       --unit={{ system_base_ssh_rollback_unit }} \
@@ -223,28 +232,3 @@
   changed_when: false
   failed_when: >-
     system_base_effective_ssh_port.stdout | trim != (ssh_port | string)
-
-- name: Read generated SSH host public key
-  ansible.builtin.slurp:
-    src: /etc/ssh/ssh_host_ed25519_key.pub
-  register: system_base_ssh_host_public_key_slurp
-  changed_when: false
-
-- name: Calculate generated SSH host key fingerprint
-  ansible.builtin.command:
-    cmd: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
-  register: system_base_ssh_host_fingerprint_command
-  changed_when: false
-
-- name: Report generated SSH host key
-  ansible.builtin.debug:
-    msg:
-      - >-
-        XRAY_SSH_HOST_PUBLIC_KEY={{
-          system_base_ssh_host_public_key_slurp.content | b64decode | trim
-        }}
-      - >-
-        XRAY_SSH_HOST_FINGERPRINT={{
-          system_base_ssh_host_fingerprint_command.stdout
-          | regex_search('SHA256:[A-Za-z0-9+/=]+')
-        }}

@@ -4,7 +4,12 @@ import sys
 import unittest
 from pathlib import Path
 
-from scripts.state_logic import bot_port_pattern, generated_port, generated_vpn_ports
+from scripts.state_logic import (
+    bot_port_pattern,
+    build_port_mapping,
+    generated_port,
+    generated_vpn_ports,
+)
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -12,6 +17,44 @@ STATE_CLI = ROOT_DIR / "scripts" / "state_cli.py"
 
 
 class PortGenerationTests(unittest.TestCase):
+    def test_nat_is_derived_from_external_and_internal_ports(self):
+        mapping = build_port_mapping(
+            bootstrap_external=40001,
+            management_external=40001,
+            sshd_internal=22,
+            bootstrap_internal=22,
+            source="legacy_project_env",
+            internal_source="inferred",
+        )
+
+        self.assertTrue(mapping["nat"]["enabled"])
+        self.assertEqual(mapping["nat"]["detection"], "derived")
+        self.assertEqual(mapping["ports"]["management_ssh"]["external"], 40001)
+        self.assertEqual(mapping["ports"]["management_ssh"]["internal"], 22)
+
+    def test_equal_ports_mean_no_translation_was_detected(self):
+        mapping = build_port_mapping(
+            bootstrap_external=40002,
+            management_external=40002,
+            sshd_internal=40002,
+        )
+
+        self.assertFalse(mapping["nat"]["enabled"])
+        self.assertEqual(mapping["nat"]["confidence"], "high")
+
+    def test_missing_internal_port_keeps_nat_unknown(self):
+        mapping = build_port_mapping(
+            bootstrap_external=22,
+            management_external=22,
+            sshd_internal=None,
+            services={"xray_xhttp": 40003},
+        )
+
+        self.assertIsNone(mapping["nat"]["enabled"])
+        self.assertEqual(mapping["nat"]["detection"], "unknown")
+        self.assertIsNone(mapping["ports"]["xray_xhttp"]["external"])
+        self.assertEqual(mapping["ports"]["xray_xhttp"]["external_status"], "not_recorded")
+
     def test_known_obvious_patterns_are_rejected(self):
         for port in (20000, 23456, 1212, 12321, 12312, 20202):
             with self.subTest(port=port):
@@ -154,6 +197,37 @@ class StateCliTests(unittest.TestCase):
         node = state["nodes"]["node-a"]
         self.assertEqual(node["bootstrap_private_key"], "")
         self.assertEqual(node["management_port"], node["ssh_port"])
+        self.assertFalse(node["port_mapping"]["nat"]["enabled"])
+
+    def test_management_user_can_be_normalized_to_deploy(self):
+        state = self.fixture_state()
+        state["nodes"]["node-a"]["management_user"] = "legacy-user"
+
+        state = self.run_cli(state, "set-management-user", "node-a", "deploy")
+
+        self.assertEqual(state["nodes"]["node-a"]["management_user"], "deploy")
+        self.assertEqual(state["nodes"]["node-a"]["management_private_key"], "private-key")
+
+    def test_deployment_state_preserves_detected_nat_mapping(self):
+        state = self.fixture_state()
+        state["nodes"]["node-a"]["port_mapping"] = {
+            "nat": {"enabled": True},
+            "ports": {"management_ssh": {"external": 40001}},
+        }
+
+        state = self.run_cli(state, "mark-deployed", "node-a")
+        node = state["nodes"]["node-a"]
+
+        self.assertEqual(node["management_port"], 40001)
+        self.assertTrue(node["port_mapping"]["nat"]["enabled"])
+
+    def test_ssh_mapping_records_the_verified_external_port(self):
+        state = self.run_cli(self.fixture_state(), "set-ssh-mapping", "node-a", "40001", "40004")
+        node = state["nodes"]["node-a"]
+
+        self.assertEqual(node["management_port"], 40001)
+        self.assertEqual(node["ssh_port"], 40004)
+        self.assertTrue(node["port_mapping"]["nat"]["enabled"])
 
     def test_invalid_local_region_is_rejected(self):
         result = subprocess.run(
@@ -175,6 +249,58 @@ class StateCliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unsupported country code", result.stderr)
 
+    def test_cascade_dns_and_country_policy_are_stored_in_deployment_settings(self):
+        state = self.fixture_state()
+        state["nodes"]["node-b"] = {
+            "host": "192.0.2.20",
+            "management_private_key": "egress-private-key",
+            "xray": {"access_keys": []},
+        }
+        state = self.run_cli(state, "add-cascade", "cascade-1", "node-a", "node-b")
+        state = self.run_cli(
+            state,
+            "set-cascade-dns-profile",
+            "cascade-1",
+            "custom",
+            "--dns-lists",
+            "urlhaus,threatfox",
+        )
+        settings = state["deployments"]["cascade-1"]["settings"]
+        self.assertEqual(
+            [source["name"] for source in settings["egress"]["rpz_sources"]],
+            ["urlhaus", "threatfox"],
+        )
+        self.assertEqual(settings["egress"]["rpz_profile"], "custom")
+        state = self.run_cli(
+            state,
+            "set-cascade-dns-profile",
+            "cascade-1",
+            "custom",
+            "--dns-lists",
+            "cascade-local-ads-tracking",
+        )
+        self.assertEqual(
+            [source["name"] for source in state["deployments"]["cascade-1"]["settings"]["egress"]["rpz_sources"]],
+            ["cascade-local-ads-tracking"],
+        )
+        state = self.run_cli(state, "set-cascade-dns-profile", "cascade-1", "maximum")
+        settings = state["deployments"]["cascade-1"]["settings"]
+        self.assertEqual(settings["egress"]["rpz_profile"], "maximum")
+        self.assertIn("hagezi-ultimate", [
+            source["name"] for source in settings["egress"]["rpz_sources"]
+        ])
+        state = self.run_cli(
+            state,
+            "set-cascade-country-policy",
+            "cascade-1",
+            "enabled",
+            "--local-region-countries",
+            "ru,de",
+        )
+        self.assertEqual(
+            state["deployments"]["cascade-1"]["settings"]["ingress"]["local_region_countries"],
+            ["ru", "de"],
+        )
     def test_add_cascade_links_existing_nodes_without_changing_credentials(self):
         state = self.fixture_state()
         state["nodes"]["node-b"] = {
@@ -262,12 +388,12 @@ class StateCliTests(unittest.TestCase):
         variables = self.run_cli(
             state,
             "--cascade-local-root",
-            "/state/xray/cascade",
+            "/state/nitka/cascade",
             "extract-cascade",
             "cascade-1",
         )
 
-        self.assertEqual(variables["cascade_ingress_local_dir"], "/state/xray/cascade/cascade-1/ingress")
+        self.assertEqual(variables["cascade_ingress_local_dir"], "/state/nitka/cascade/cascade-1/ingress")
         self.assertEqual(variables["cascade_egress_deploy_authorized_key"], "ssh-ed25519 egress")
 
 

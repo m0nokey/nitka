@@ -55,20 +55,13 @@ def fleet_items(state):
 
 def render(state, diagnostics=None):
     items = fleet_items(state)
-    active = 0
-    partial = 0
-    for kind, _, first, second in items:
-        status = deployment_status((first, second), diagnostics) if kind == "cascade" else status_for_node(first, diagnostics)
-        if status == "Active":
-            active += 1
-        else:
-            partial += 1
 
     print("Node Management:")
     print()
-    print(f"Fleet status: {active} Active, {partial} Partial")
-    print()
-    print("   IP              STATUS   COUNTRY   CREATED      MODE              PROVIDER")
+    print(
+        f"{'':<5}{'IP':<15} {'STATUS':<8} {'COUNTRY':<9} "
+        f"{'CREATED':<12} {'MODE':<17} PROVIDER"
+    )
     print()
     for number, (kind, _, first, second) in enumerate(items, 1):
         first_mode = "Cascade ingress" if kind == "cascade" else first.get("mode", "Xray")
@@ -94,7 +87,7 @@ def render(state, diagnostics=None):
                 second.get("provider", "N/A"),
             )
             print(
-                f"     └─ {second_values[0]:<12} {second_values[1]:<8} "
+                f"  └─ {second_values[0]:<15} {second_values[1]:<8} "
                 f"{second_values[2]:<9} {second_values[3]:<12} {second_values[4]:<17} {second_values[5]}"
             )
     print()

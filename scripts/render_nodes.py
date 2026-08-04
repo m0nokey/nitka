@@ -56,6 +56,54 @@ def management_ports(node):
     return ports
 
 
+def service_containers(node):
+    """Return container names used by the selected node's deployment."""
+    role = node.get("role")
+    if role == "ingress":
+        return (
+            "cascade-xray",
+            "xray",
+            "nitka-xray",
+            "cascade-clashrs",
+            "nitka-clashrs",
+            "cascade-ssh-tun-client",
+            "nitka-ssh-tun-client",
+        )
+    if role == "egress":
+        return (
+            "cascade-ssh-tun-server",
+            "ssh-tun-server",
+            "nitka-ssh-tun-server",
+        )
+    return ("xray", "cascade-xray", "nitka-xray")
+
+
+def service_probe_command(node):
+    if node.get("role") == "egress":
+        case_clause = "*ssh*tun*|*ssh_tun*|*tun*ssh*"
+    else:
+        case_clause = "*xray*"
+    containers = " ".join(service_containers(node))
+    return (
+        "running_containers=\"$(sudo -n docker ps -a --format '{{.Names}}:{{.State}}' "
+        "2>/dev/null || docker ps -a --format '{{.Names}}:{{.State}}' "
+        "2>/dev/null || true)\"; "
+        "for entry in $running_containers; do "
+        "container=\"${entry%%:*}\"; status=\"${entry#*:}\"; "
+        f"case \"$container\" in {case_clause}) ;; *) continue;; esac; "
+        "case \"$status\" in running) printf service-running;; *) "
+        "printf 'service-%s' \"$status\";; esac; exit 0; done; "
+        f"for container in {containers}; do "
+        "status=\"$(sudo -n docker inspect --format '{{.State.Status}}' \"$container\" "
+        "2>/dev/null || docker inspect --format '{{.State.Status}}' \"$container\" "
+        "2>/dev/null || true)\"; [ -n \"$status\" ] || continue; "
+        f"case \"$container\" in {case_clause}) ;; *) continue;; esac; "
+        "case \"$status\" in running) printf service-running;; *) "
+        "printf 'service-%s' \"$status\";; esac; exit 0; done; "
+        "printf service-not-found"
+    )
+
+
 def management_state(node, timeout=5.0):
     """Probe management access and return details without exposing credentials."""
     host = node.get("host", "")
@@ -69,7 +117,7 @@ def management_state(node, timeout=5.0):
         "tcp_ports": [],
         "ssh_port": None,
         "ssh": "not checked",
-        "ssh_error": "",
+        "service": "not checked",
         "xray": "not checked",
     }
     if not host or not ports:
@@ -109,36 +157,29 @@ def management_state(node, timeout=5.0):
         os.chmod(known_hosts_path, 0o600)
 
         for ssh_port in reachable_ports:
+            ssh_options = [
+                "-i",
+                key_path,
+                "-p",
+                str(ssh_port),
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=3",
+                "-o",
+                "ConnectionAttempts=1",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                f"UserKnownHostsFile={known_hosts_path}",
+                "-o",
+                "LogLevel=ERROR",
+            ]
+            ssh_command = ["ssh", *ssh_options, f"{user}@{host}"]
             result = subprocess.run(
-                [
-                    "ssh",
-                    "-i",
-                    key_path,
-                    "-p",
-                    str(ssh_port),
-                    "-o",
-                    "IdentitiesOnly=yes",
-                    "-o",
-                    "BatchMode=yes",
-                    "-o",
-                    "ConnectTimeout=3",
-                    "-o",
-                    "ConnectionAttempts=1",
-                    "-o",
-                    "StrictHostKeyChecking=yes",
-                    "-o",
-                    f"UserKnownHostsFile={known_hosts_path}",
-                    "-o",
-                    "LogLevel=ERROR",
-                    f"{user}@{host}",
-                    (
-                        "status=\"$(sudo -n docker inspect --format '{{.State.Status}}' xray "
-                        "2>/dev/null || docker inspect --format '{{.State.Status}}' xray "
-                        "2>/dev/null || true)\"; case \"$status\" in running) "
-                        "printf xray-running;; '') printf xray-not-found;; *) "
-                        "printf 'xray-%s' \"$status\";; esac"
-                    ),
-                ],
+                [*ssh_command, "true"],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
@@ -148,7 +189,30 @@ def management_state(node, timeout=5.0):
             if result.returncode == 0:
                 details["ssh_port"] = ssh_port
                 details["ssh"] = "connected"
-                details["xray"] = result.stdout.strip() or "empty response"
+                try:
+                    service_result = subprocess.run(
+                        [*ssh_command, service_probe_command(node)],
+                        stdin=subprocess.DEVNULL,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    details["service"] = "service-command-timeout"
+                    return details
+                if service_result.returncode == 0:
+                    details["service"] = (
+                        service_result.stdout.strip() or "empty response"
+                    )
+                else:
+                    details["service"] = "service-command-failed"
+                details["xray"] = (
+                    "xray-running"
+                    if details["service"] == "service-running"
+                    and node.get("role") != "egress"
+                    else details["service"]
+                )
                 return details
             error = (result.stderr or "").lower()
             details["ssh_error"] = " ".join((result.stderr or "").split())[:240]
@@ -193,15 +257,19 @@ def node_diagnostics(node):
         management = management_future.result()
 
     ssh_reachable = bool(management["tcp_ports"] or management["ssh_port"])
-    xray_running = management["xray"] == "xray-running"
+    service_running = management.get("service") == "service-running" or (
+        management.get("xray") == "xray-running"
+    )
 
     if not ssh_reachable and not any(probes):
         status = "Unreachable"
     elif not ssh_reachable:
         status = "VPN unavailable"
-    elif xray_running and len(probes) == 2 and all(probes):
+    elif service_running and not ports:
         status = "Active"
-    elif xray_running and any(probes):
+    elif service_running and len(probes) == 2 and all(probes):
+        status = "Active"
+    elif service_running and any(probes):
         status = "Partial"
     else:
         status = "VPN unavailable"
@@ -229,9 +297,12 @@ def endpoint_label(node, port):
 def connectivity_lines(node, diagnostics):
     management = diagnostics["management"]
     ssh_port = management.get("ssh_port") or management.get("management_port")
-    ssh_state = "reachable" if management.get("ssh") == "connected" else "unavailable"
+    tcp_state = (
+        "open" if ssh_port in management.get("tcp_ports", []) else "unavailable"
+    )
+    ssh_state = management.get("ssh", "not checked")
     lines = [
-        f"    {'OpenSSH':<34}TCP {ssh_port!s:<10}{ssh_state}",
+        f"    {'OpenSSH':<34}TCP {ssh_port!s:<10}{tcp_state}  SSH: {ssh_state}",
     ]
     for port, reachable in diagnostics["vpn"]:
         state = "reachable" if reachable else "unavailable"

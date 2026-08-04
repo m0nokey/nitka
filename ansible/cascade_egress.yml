@@ -3,12 +3,47 @@
   hosts: cascade_egress
   become: true
   gather_facts: true
+  force_handlers: true
+  pre_tasks:
+    - name: Snapshot current Cascade egress stack before deployment
+      ansible.builtin.shell: |
+        set -eu
+        source_dir="{{ cascade_egress_remote_dir }}"
+        backup_root="/var/lib/nitka/backup/cascade-egress"
+        latest="$backup_root.latest"
+        if [ -f "$source_dir/compose.yml" ]; then
+          backup="$backup_root.$(date -u +%Y%m%dT%H%M%SZ)"
+          install -d -m 0700 "$backup"
+          cp -a "$source_dir/." "$backup/"
+          printf '%s\n' "$backup" > "$latest"
+          chmod 0600 "$latest"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      no_log: true
   roles:
     - role: system_base
       vars:
         system_base_deploy_authorized_key: "{{ cascade_egress_deploy_authorized_key }}"
+        system_base_harden_ssh_initial_user: "{{ cascade_egress_harden_ssh_initial_user }}"
+        system_base_harden_ssh_preserve_users: "{{ cascade_egress_harden_ssh_preserve_users }}"
+        system_base_os_updater_name: cascade
+        system_base_enable_docker_updater: true
         system_base_docker_updater_name: "{{ cascade_egress_updater_name | default('cascade-egress') }}"
+        system_base_docker_updater_calendar: "*-*-* 02:00"
         system_base_docker_updater_compose_file: "{{ cascade_egress_remote_dir }}/compose.yml"
+        system_base_docker_updater_services:
+          - service: ssh_tun_server
+            container: cascade-ssh-tun-server
+            image_type: build
+            base_image: alpine:3.23
+            cascade_restart:
+              - unbound
+          - service: unbound
+            container: cascade-unbound
+            image_type: build
+            base_image: alpine:3.23
     - role: cascade_ssh_tun
       vars:
         cascade_ssh_tun_endpoint: server

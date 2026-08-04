@@ -12,9 +12,17 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from deployment_logic import attach_cascade, cascade_ansible_vars
 from nacl.public import PrivateKey
-from state_logic import generated_port, generated_vpn_ports
+from deployment_logic import (
+    CASCADE_DEFAULT_SETTINGS,
+    CASCADE_RPZ_PROFILES,
+    CASCADE_RPZ_SOURCES,
+    attach_cascade,
+    cascade_ansible_vars,
+    normalize_cascade_transport,
+)
+from routing_policy import import_routing_policy
+from state_logic import build_port_mapping, generated_port, generated_vpn_ports
 
 COUNTRIES_FILE = Path(__file__).resolve().parent.parent / "data" / "countries.tsv"
 
@@ -87,14 +95,41 @@ def deploy_key():
                 pass
 
 
+def ssh_public_key_from_private(path):
+    result = subprocess.run(
+        ["ssh-keygen", "-y", "-f", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def ssh_public_key_fingerprint(public_key):
+    result = subprocess.run(
+        ["ssh-keygen", "-lf", "-", "-E", "sha256"],
+        input=f"{public_key}\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.split()[1]
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "action",
     choices=(
         "count", "names", "extract", "extract-cascade", "mark-deployed",
         "set-management-key", "set-ssh-host-key", "set-bootstrap",
+        "set-ssh-mapping", "set-management-user",
+        "set-cascade-transport-port",
+        "normalize-cascade-transport",
+        "capture-cascade-transport-keys",
         "set-dns-profile", "set-local-region", "remove-node", "add-node",
+        "set-cascade-dns-profile", "set-cascade-country-policy",
         "add-cascade", "remove-cascade", "share-management-key", "add-key", "add-keys", "remove-key", "remove-all-keys",
+        "import-routing",
     ),
 )
 parser.add_argument("args", nargs="*")
@@ -110,7 +145,7 @@ parser.add_argument("--vision-port", type=int)
 parser.add_argument("--xhttp-port", type=int)
 parser.add_argument(
     "--dns-profile",
-    choices=("disabled", "minimal", "optimal", "full", "maximum", "custom"),
+    choices=("disabled", "minimal", "optimal", "security", "full", "maximum", "custom"),
     default="disabled",
 )
 parser.add_argument(
@@ -147,10 +182,17 @@ elif opts.action == "extract":
         "xray_public_host": node["host"],
         "management_user": node["management_user"],
         "management_authorized_key": node["management_authorized_key"],
-        "system_base_deploy_user": node["management_user"],
+        "system_base_deploy_user": "deploy",
         "system_base_deploy_authorized_key": node["management_authorized_key"],
         "management_private_key": node["management_private_key"],
-        "system_base_harden_ssh_initial_user": node.get("bootstrap_user", "root"),
+        "system_base_harden_ssh_initial_user": node.get("management_user", "deploy"),
+        "system_base_harden_ssh_preserve_users": list(dict.fromkeys(
+            user for user in (
+                node.get("management_user", "deploy"),
+                node.get("bootstrap_user"),
+                *(node.get("preserved_management_users") or []),
+            ) if user and user != "root"
+        )),
         "ssh_port": node["ssh_port"],
         "management_port": node["management_port"],
         "system_base_ssh_host_public_key": node.get("ssh_host_public_key", ""),
@@ -164,13 +206,32 @@ elif opts.action == "mark-deployed":
         raise SystemExit("mark-deployed requires NODE")
     node = nodes[opts.args[0]]
     node["bootstrap_private_key"] = ""
-    node["management_port"] = node["ssh_port"]
+    mapping = node.get("port_mapping", {})
+    nat_enabled = mapping.get("nat", {}).get("enabled")
+    if nat_enabled is True:
+        management_port = mapping.get("ports", {}).get("management_ssh", {}).get(
+            "external", node["management_port"]
+        )
+    else:
+        management_port = node["ssh_port"]
+    node["management_port"] = management_port
+    xray = node.get("xray", {})
+    node["port_mapping"] = build_port_mapping(
+        bootstrap_external=node.get("bootstrap_ssh_port"),
+        management_external=management_port,
+        sshd_internal=node["ssh_port"],
+        services={
+            "xray_reality": xray.get("vision_port"),
+            "xray_xhttp": xray.get("xhttp_port"),
+        } if xray else {},
+        source="state_cli",
+    )
     node["status"] = "Active"
 elif opts.action == "extract-cascade":
     if len(opts.args) != 1:
         raise SystemExit("extract-cascade requires DEPLOYMENT_ID")
     local_root = opts.cascade_local_root or str(
-        Path(os.environ.get("XDG_STATE_HOME", "/tmp")) / "xray" / "cascade"
+        Path(os.environ.get("XDG_STATE_HOME", "/tmp")) / "nitka" / "cascade"
     )
     output = cascade_ansible_vars(state, opts.args[0], local_root)
     json.dump(output, sys.stdout, indent=2)
@@ -182,6 +243,12 @@ elif opts.action == "set-management-key":
     node = nodes[opts.args[0]]
     node["management_private_key"] = Path(opts.args[1]).read_text(encoding="utf-8")
     node["management_authorized_key"] = Path(opts.args[2]).read_text(encoding="utf-8").strip()
+    try:
+        node["management_fingerprint"] = ssh_public_key_fingerprint(
+            node["management_authorized_key"]
+        )
+    except (OSError, subprocess.SubprocessError, IndexError) as exc:
+        raise SystemExit("invalid management public key") from exc
 elif opts.action == "set-ssh-host-key":
     if len(opts.args) != 3 or opts.args[0] not in nodes:
         raise SystemExit("set-ssh-host-key requires NODE PUBLIC_KEY_FILE FINGERPRINT")
@@ -205,11 +272,105 @@ elif opts.action == "set-bootstrap":
     node["bootstrap_ssh_port"] = int(opts.args[2])
     node["bootstrap_password"] = password
     node["management_port"] = node["bootstrap_ssh_port"]
+    xray = node.get("xray", {})
+    node["port_mapping"] = build_port_mapping(
+        bootstrap_external=node["bootstrap_ssh_port"],
+        management_external=node["management_port"],
+        sshd_internal=None,
+        services={
+            "xray_reality": xray.get("vision_port"),
+            "xray_xhttp": xray.get("xhttp_port"),
+        } if xray else {},
+        source="state_cli",
+    )
+elif opts.action == "set-ssh-mapping":
+    if len(opts.args) != 3 or opts.args[0] not in nodes:
+        raise SystemExit("set-ssh-mapping requires NODE EXTERNAL_PORT INTERNAL_PORT")
+    node = nodes[opts.args[0]]
+    external_port = int(opts.args[1])
+    internal_port = int(opts.args[2])
+    node["management_port"] = external_port
+    node["ssh_port"] = internal_port
+    xray = node.get("xray", {})
+    node["port_mapping"] = build_port_mapping(
+        bootstrap_external=node.get("bootstrap_ssh_port"),
+        management_external=external_port,
+        sshd_internal=internal_port,
+        services={
+            "xray_reality": xray.get("vision_port"),
+            "xray_xhttp": xray.get("xhttp_port"),
+        } if xray else {},
+        source="state_cli",
+    )
+elif opts.action == "set-management-user":
+    if len(opts.args) != 2 or opts.args[0] not in nodes:
+        raise SystemExit("set-management-user requires NODE USER")
+    if opts.args[1] != "deploy":
+        raise SystemExit("management user must be deploy")
+    node = nodes[opts.args[0]]
+    previous = node.get("management_user")
+    if previous and previous != "deploy":
+        preserved = node.setdefault("preserved_management_users", [])
+        if previous not in preserved:
+            preserved.append(previous)
+    node["management_user"] = "deploy"
+elif opts.action == "set-cascade-transport-port":
+    if len(opts.args) != 2:
+        raise SystemExit("set-cascade-transport-port requires DEPLOYMENT_ID PORT")
+    deployment = state.get("deployments", {}).get(opts.args[0])
+    if not isinstance(deployment, dict):
+        raise SystemExit(f"deployment not found: {opts.args[0]}")
+    try:
+        transport_port = int(opts.args[1])
+    except ValueError as exc:
+        raise SystemExit("cascade transport port must be a number") from exc
+    if not 1025 <= transport_port <= 65535 or transport_port == 22:
+        raise SystemExit(
+            "cascade transport port must be between 1025 and 65535 and cannot be 22"
+        )
+    deployment.setdefault("settings", {}).setdefault("ssh_tun", {})[
+        "port"
+    ] = transport_port
+elif opts.action == "normalize-cascade-transport":
+    if len(opts.args) != 1:
+        raise SystemExit("normalize-cascade-transport requires DEPLOYMENT_ID")
+    state = normalize_cascade_transport(state, opts.args[0])
+elif opts.action == "capture-cascade-transport-keys":
+    if len(opts.args) != 2:
+        raise SystemExit(
+            "capture-cascade-transport-keys requires DEPLOYMENT_ID KEY_DIRECTORY"
+        )
+    deployment = state.get("deployments", {}).get(opts.args[0])
+    if not isinstance(deployment, dict):
+        raise SystemExit(f"deployment not found: {opts.args[0]}")
+    key_directory = Path(opts.args[1])
+    auth_private_path = key_directory / "id_ed25519"
+    host_private_path = key_directory / "ssh_host_ed25519_key"
+    if not auth_private_path.is_file() or not host_private_path.is_file():
+        raise SystemExit("Cascade transport keypair is incomplete")
+    try:
+        auth_private = auth_private_path.read_text(encoding="utf-8")
+        host_private = host_private_path.read_text(encoding="utf-8")
+        auth_public = ssh_public_key_from_private(auth_private_path)
+        host_public = ssh_public_key_from_private(host_private_path)
+        auth_fingerprint = ssh_public_key_fingerprint(auth_public)
+        host_fingerprint = ssh_public_key_fingerprint(host_public)
+    except (OSError, subprocess.SubprocessError, IndexError) as exc:
+        raise SystemExit("Could not read Cascade transport keypair") from exc
+    ssh_tun = deployment.setdefault("settings", {}).setdefault("ssh_tun", {})
+    ssh_tun.update({
+        "ssh_tun_private_key": auth_private,
+        "ssh_tun_public_key": auth_public,
+        "ssh_tun_fingerprint": auth_fingerprint,
+        "ssh_tun_host_private_key": host_private,
+        "ssh_tun_host_public_key": host_public,
+        "ssh_tun_host_fingerprint": host_fingerprint,
+    })
 elif opts.action == "set-dns-profile":
     if len(opts.args) != 2 or opts.args[0] not in nodes:
         raise SystemExit("set-dns-profile requires NODE PROFILE")
     profile = opts.args[1]
-    if profile not in ("disabled", "minimal", "optimal", "full", "maximum", "custom"):
+    if profile not in ("disabled", "minimal", "optimal", "security", "full", "maximum", "custom"):
         raise SystemExit("unsupported DNS protection profile")
     node_xray = nodes[opts.args[0]].setdefault("xray", {})
     node_xray["dns_filter_profile"] = profile
@@ -217,6 +378,52 @@ elif opts.action == "set-dns-profile":
         node_xray["dns_filter_lists"] = [item for item in opts.dns_lists.split(",") if item]
     else:
         node_xray.pop("dns_filter_lists", None)
+elif opts.action == "set-cascade-dns-profile":
+    if len(opts.args) != 2 or opts.args[0] not in state.get("deployments", {}):
+        raise SystemExit("set-cascade-dns-profile requires DEPLOYMENT_ID PROFILE")
+    profile = opts.args[1]
+    if profile not in ("disabled", "minimal", "optimal", "security", "full", "maximum", "custom"):
+        raise SystemExit("unsupported Cascade DNS protection profile")
+    deployment = state["deployments"][opts.args[0]]
+    settings = deployment.setdefault("settings", {})
+    egress = settings.setdefault("egress", {})
+    egress["rpz_profile"] = profile
+    if profile == "disabled":
+        egress["rpz_sources"] = []
+    else:
+        names = list(dict.fromkeys(
+            item.strip() for item in opts.dns_lists.split(",") if item.strip()
+        ))
+        if profile != "custom":
+            names = list(CASCADE_RPZ_PROFILES[profile])
+        catalog = {source["name"]: source for source in CASCADE_RPZ_SOURCES}
+        unknown = [name for name in names if name not in catalog]
+        if unknown:
+            raise SystemExit(f"unsupported Cascade RPZ source: {', '.join(unknown)}")
+        if not names:
+            raise SystemExit("custom Cascade DNS protection requires at least one RPZ source")
+        egress["rpz_sources"] = [catalog[name] for name in names]
+elif opts.action == "set-cascade-country-policy":
+    if len(opts.args) != 2 or opts.args[0] not in state.get("deployments", {}):
+        raise SystemExit("set-cascade-country-policy requires DEPLOYMENT_ID ENABLED_OR_DISABLED")
+    if opts.args[1] not in ("enabled", "disabled"):
+        raise SystemExit("set-cascade-country-policy requires enabled or disabled")
+    countries = []
+    if opts.args[1] == "enabled":
+        countries = list(dict.fromkeys(
+            item.strip().lower()
+            for item in opts.local_region_countries.split(",")
+            if item.strip()
+        ))
+        invalid = [item for item in countries if not re.fullmatch(r"[a-z]{2}", item)]
+        invalid.extend(item for item in countries if item not in country_codes() and item not in invalid)
+        if invalid:
+            raise SystemExit(f"unsupported country code: {', '.join(invalid)}")
+        if not countries:
+            raise SystemExit("enabled Cascade country policy requires at least one country")
+    state["deployments"][opts.args[0]].setdefault("settings", {}).setdefault(
+        "ingress", {}
+    )["local_region_countries"] = countries
 elif opts.action == "set-local-region":
     if len(opts.args) != 2 or opts.args[0] not in nodes:
         raise SystemExit("set-local-region requires NODE ENABLED_OR_DISABLED")
@@ -236,6 +443,10 @@ elif opts.action == "set-local-region":
         if not countries:
             raise SystemExit("enabled local-region policy requires at least one country")
     nodes[opts.args[0]].setdefault("xray", {})["local_region_countries"] = countries
+elif opts.action == "import-routing":
+    if len(opts.args) != 2:
+        raise SystemExit("import-routing requires NODE ROUTING_FILE")
+    state = import_routing_policy(state, opts.args[0], opts.args[1])
 elif opts.action == "remove-node":
     if len(opts.args) != 1 or opts.args[0] not in nodes:
         raise SystemExit("remove-node requires NODE")
@@ -257,8 +468,15 @@ elif opts.action == "add-node":
     country, provider = ip_info(host)
     private, public = deploy_key()
     bootstrap_private = ""
+    bootstrap_public = ""
+    bootstrap_fingerprint = ""
     if opts.bootstrap_key:
         bootstrap_private = Path(opts.bootstrap_key).read_text(encoding="utf-8")
+        try:
+            bootstrap_public = ssh_public_key_from_private(Path(opts.bootstrap_key))
+            bootstrap_fingerprint = ssh_public_key_fingerprint(bootstrap_public)
+        except (OSError, subprocess.SubprocessError, IndexError) as exc:
+            raise SystemExit("invalid bootstrap private key") from exc
     bootstrap_password = os.environ.get("XRAY_BOOTSTRAP_PASSWORD", "")
     bootstrap_port = int(os.environ.get("XRAY_BOOTSTRAP_PORT", "22"))
     bootstrap_user = os.environ.get("XRAY_BOOTSTRAP_USER", "root")
@@ -307,12 +525,25 @@ elif opts.action == "add-node":
         "management_user": "deploy",
         "management_private_key": private,
         "management_authorized_key": public,
+        "management_fingerprint": ssh_public_key_fingerprint(public),
         "bootstrap_private_key": bootstrap_private,
+        "bootstrap_public_key": bootstrap_public,
+        "bootstrap_fingerprint": bootstrap_fingerprint,
         "bootstrap_password": bootstrap_password,
         "bootstrap_user": bootstrap_user,
         "bootstrap_ssh_port": bootstrap_port,
         "ssh_port": ssh_port,
         "management_port": bootstrap_port,
+        "port_mapping": build_port_mapping(
+            bootstrap_external=bootstrap_port,
+            management_external=bootstrap_port,
+            sshd_internal=None,
+            services={
+                "xray_reality": vision_port,
+                "xray_xhttp": xhttp_port,
+            } if xray_state else {},
+            source="state_cli",
+        ),
         "role": opts.node_role,
         "ssh_host_public_key": "",
         "ssh_host_fingerprint": "",
@@ -352,6 +583,7 @@ elif opts.action == "share-management-key":
     destination = nodes[opts.args[1]]
     destination["management_private_key"] = source["management_private_key"]
     destination["management_authorized_key"] = source["management_authorized_key"]
+    destination["management_fingerprint"] = source.get("management_fingerprint", "")
 elif opts.action in ("add-key", "add-keys", "remove-key", "remove-all-keys"):
     if len(opts.args) < 1:
         raise SystemExit(f"{opts.action} requires NODE")

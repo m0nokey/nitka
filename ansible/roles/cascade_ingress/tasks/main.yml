@@ -1,5 +1,6 @@
 ---
 - name: Prepare local ingress directories
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.file:
@@ -21,6 +22,7 @@
     - "{{ cascade_ingress_remote_dir }}/xray"
 
 - name: Generate xhttp UUID
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.shell: |
@@ -34,9 +36,9 @@
   args:
     creates: "{{ cascade_ingress_state_dir }}/xhttp_uuid"
   when: cascade_ingress_xray_xhttp_uuid is not defined
-  notify: Restart ingress stack
 
 - name: Generate reality UUID
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.shell: |
@@ -50,9 +52,9 @@
   args:
     creates: "{{ cascade_ingress_state_dir }}/reality_uuid"
   when: cascade_ingress_xray_reality_uuid is not defined
-  notify: Restart ingress stack
 
 - name: Generate xhttp port
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.shell: |
@@ -66,9 +68,9 @@
   args:
     creates: "{{ cascade_ingress_state_dir }}/xhttp_port"
   when: cascade_ingress_xray_xhttp_port is not defined
-  notify: Restart ingress stack
 
 - name: Generate reality port
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.shell: |
@@ -82,9 +84,9 @@
   args:
     creates: "{{ cascade_ingress_state_dir }}/reality_port"
   when: cascade_ingress_xray_reality_port is not defined
-  notify: Restart ingress stack
 
 - name: Generate reality short id
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.shell: |
@@ -94,9 +96,9 @@
   args:
     creates: "{{ cascade_ingress_state_dir }}/reality_short_id"
   when: cascade_ingress_xray_reality_short_id is not defined
-  notify: Restart ingress stack
 
 - name: Generate reality keypair
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.shell: |
@@ -131,14 +133,13 @@
   args:
     creates: "{{ cascade_ingress_state_dir }}/reality_private_key"
   when: cascade_ingress_xray_reality_private_key is not defined
-  notify: Restart ingress stack
 
-- name: Set generated Xray state file permissions
+- name: Check generated Xray state files
+  become: false
   delegate_to: localhost
   run_once: true
-  ansible.builtin.file:
+  ansible.builtin.stat:
     path: "{{ cascade_ingress_state_dir }}/{{ item.name }}"
-    mode: "{{ item.mode }}"
   loop:
     - { name: 'xhttp_uuid', mode: '0600' }
     - { name: 'reality_uuid', mode: '0600' }
@@ -147,9 +148,21 @@
     - { name: 'reality_short_id', mode: '0600' }
     - { name: 'reality_private_key', mode: '0600' }
     - { name: 'reality_public_key', mode: '0644' }
+  register: cascade_ingress_state_file_stats
+
+- name: Set generated Xray state file permissions
+  become: false
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ cascade_ingress_state_dir }}/{{ item.item.name }}"
+    mode: "{{ item.item.mode }}"
+  loop: "{{ cascade_ingress_state_file_stats.results }}"
+  when: item.stat.exists
   changed_when: false
 
 - name: Read xhttp UUID
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.set_fact:
@@ -158,6 +171,7 @@
   when: cascade_ingress_xray_xhttp_uuid is not defined
 
 - name: Read reality UUID
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.set_fact:
@@ -166,6 +180,7 @@
   when: cascade_ingress_xray_reality_uuid is not defined
 
 - name: Read xhttp port
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.set_fact:
@@ -174,6 +189,7 @@
   when: cascade_ingress_xray_xhttp_port is not defined
 
 - name: Read reality port
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.set_fact:
@@ -182,6 +198,7 @@
   when: cascade_ingress_xray_reality_port is not defined
 
 - name: Read reality short id
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.set_fact:
@@ -190,6 +207,7 @@
   when: cascade_ingress_xray_reality_short_id is not defined
 
 - name: Read reality public key
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.set_fact:
@@ -198,6 +216,7 @@
   when: cascade_ingress_xray_reality_public_key is not defined
 
 - name: Validate reality keypair consistency
+  become: false
   delegate_to: localhost
   run_once: true
   ansible.builtin.shell: |
@@ -233,6 +252,7 @@
   when: cascade_ingress_xray_reality_private_key is not defined
 
 - name: Build ingress share links
+  become: false
   delegate_to: localhost
   run_once: true
   no_log: true
@@ -250,13 +270,14 @@
       {{ 'vless://' ~ cascade_ingress_xray_reality_uuid ~ '@'
          ~ cascade_ingress_xray_public_host ~ ':' ~ cascade_ingress_xray_reality_port
          ~ '?encryption=none&security=reality&sni='
-         ~ (cascade_ingress_xray_obfs_host | urlencode) ~ '&fp=chrome&pbk='
+         ~ (cascade_ingress_xray_obfs_host | urlencode) ~ '&fp=chrome&headerType=none&pbk='
          ~ cascade_ingress_xray_reality_public_key ~ '&sid='
          ~ cascade_ingress_xray_reality_short_id ~ '&type=tcp&flow=xtls-rprx-vision#'
          ~ (cascade_ingress_xray_reality_remarks | urlencode) }}
   changed_when: false
 
 - name: Write share links to file
+  become: false
   delegate_to: localhost
   run_once: true
   no_log: true
@@ -266,6 +287,8 @@
     content: |
       {{ cascade_ingress_xray_xhttp_share_link }}
       {{ cascade_ingress_xray_reality_share_link }}
+  vars:
+    ansible_remote_tmp: /tmp/ansible-local
   changed_when: false
 
 - name: Render docker compose
@@ -274,7 +297,6 @@
     src: compose.yml.j2
     dest: "{{ cascade_ingress_remote_dir }}/compose.yml"
     mode: "0644"
-  notify: Restart ingress stack
 
 - name: Validate rendered docker compose
   become: true
@@ -287,7 +309,6 @@
     src: clashrs/config.yaml.j2
     dest: "{{ cascade_ingress_remote_dir }}/clashrs/config.yaml"
     mode: "0644"
-  notify: Restart ingress stack
 
 - name: Render xray config
   become: true
@@ -300,7 +321,6 @@
       -v %s:/etc/xray/config.json:ro
       ghcr.io/xtls/xray-core:26.6.27
       run -test -c /etc/xray/config.json
-  notify: Restart ingress stack
 
 - name: Render ingress watchdog script
   become: true
@@ -372,6 +392,17 @@
 
 - name: Ensure ingress stack is running
   block:
+    - name: Stop Cascade ingress updater before stack changes
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop:
+        - cascade-ingress-docker-updater.timer
+        - cascade-ingress-docker-updater.service
+      failed_when: false
+
     - name: Run ingress stack ensure script
       become: true
       ansible.builtin.command:
@@ -414,6 +445,68 @@
         - not (cascade_ingress_stack_run.unreachable | default(false))
         - cascade_ingress_stack_run.rc | default(0) != 0
 
+  rescue:
+    - name: Remove incomplete Cascade ingress stack
+      become: true
+      ansible.builtin.shell: >-
+        if [ -f "{{ cascade_ingress_remote_dir }}/compose.yml" ]; then
+          docker compose -f "{{ cascade_ingress_remote_dir }}/compose.yml" down --remove-orphans;
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Restore current Cascade ingress stack from backup
+      become: true
+      ansible.builtin.shell: |
+        set -eu
+        latest=/var/lib/nitka/backup/cascade-ingress.latest
+        if [ -s "$latest" ] && [ -d "$(cat "$latest")" ]; then
+          backup_dir="$(cat "$latest")"
+          failed_dir="{{ cascade_ingress_remote_dir }}.failed.$$"
+          mv "{{ cascade_ingress_remote_dir }}" "$failed_dir"
+          install -d -m 0755 "{{ cascade_ingress_remote_dir }}"
+          if ! cp -a "$backup_dir/." "{{ cascade_ingress_remote_dir }}/"; then
+            rm -rf "{{ cascade_ingress_remote_dir }}"
+            mv "$failed_dir" "{{ cascade_ingress_remote_dir }}"
+            exit 1
+          fi
+          rm -rf "$failed_dir"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Restore current Cascade ingress Docker stack after failed deployment
+      become: true
+      ansible.builtin.shell: >-
+        if [ -f "{{ cascade_ingress_remote_dir }}/compose.yml" ]; then
+          docker compose -f "{{ cascade_ingress_remote_dir }}/compose.yml" up -d;
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Restore Cascade ingress updater after failed deployment
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - cascade-ingress-docker-updater.timer
+        - cascade-os-updater.timer
+      failed_when: false
+
+    - name: Fail Cascade ingress deployment after rollback
+      ansible.builtin.fail:
+        msg: >-
+          ingress stack deployment failed; the previous Cascade ingress stack was restored.
+          Cascade command output: {{ cascade_ingress_stack_run.stderr | default(cascade_ingress_stack_run.msg | default('no stderr')) }}
+
 - name: Keep ingress watchdog timer masked and stopped
   become: true
   ansible.builtin.systemd_service:
@@ -429,16 +522,20 @@
   ansible.builtin.systemd_service:
     daemon_reload: true
 
+- name: Enable Cascade ingress updater timers after successful deployment
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - cascade-ingress-docker-updater.timer
+    - cascade-os-updater.timer
+  failed_when: false
+
 - name: Enable ingress watchdog service
   become: true
   ansible.builtin.systemd_service:
     name: cascade-ingress-watchdog.service
     enabled: true
     state: "{{ 'restarted' if (cascade_ingress_watchdog_service.changed or cascade_ingress_watchdog_timer.changed) else 'started' }}"
-
-- name: Show ingress share link location
-  ansible.builtin.debug:
-    msg:
-      - "Saved to: {{ cascade_ingress_xray_share_link_path }}"
-      - "Use ./run.sh --show-links to print client links."
-  changed_when: false

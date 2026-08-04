@@ -17,9 +17,9 @@
           - ansible_facts.os_family == "Debian"
         fail_msg: "Nitka supports Debian only."
 
-    - name: Report VPS resources
+    - name: Report resource facts to the controller
       ansible.builtin.debug:
         msg: >-
           XRAY_RESOURCE_FACTS
-          vcpus={{ ansible_facts.processor_vcpus }}
-          ram_mb={{ ansible_facts.memtotal_mb }}
+          vcpus={{ ansible_facts.processor_vcpus | int }}
+          ram_mb={{ ansible_facts.memtotal_mb | int }}
