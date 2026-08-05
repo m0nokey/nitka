@@ -91,9 +91,9 @@ def render(state, diagnostics=None):
     headers = ("IP", "STATUS", "COUNTRY", "CREATED", "MODE", "PROVIDER")
     data_rows = [row[1:] for row in table_rows]
     widths = column_widths(headers, data_rows)
-    print(format_row(headers, widths, indent="   ", gap="   "))
+    print(format_row(headers, widths, indent="     ", gap="   "))
     for row in table_rows:
-        print(f"{row[0]} {format_row(row[1:], widths, gap='   ')}")
+        print(f"  {row[0]} {format_row(row[1:], widths, gap='   ')}")
     print()
 
 

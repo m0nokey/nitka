@@ -82,8 +82,8 @@ class CascadeRenderTests(unittest.TestCase):
         header = next(line for line in lines if "IP" in line and "PROVIDER" in line)
         ingress = next(line for line in lines if "1. 203.0.113.42" in line)
         egress = next(line for line in lines if "└─ 192.0.2.24" in line)
-        self.assertTrue(ingress.startswith("1. "))
-        self.assertTrue(egress.startswith("└─ "))
+        self.assertTrue(ingress.startswith("  1. "))
+        self.assertTrue(egress.startswith("  └─ "))
         header_positions = [header.index(field) for field in (
             "IP", "STATUS", "COUNTRY", "CREATED", "MODE", "PROVIDER"
         )]
