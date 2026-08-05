@@ -324,15 +324,22 @@ def replace_cascade_node(state, deployment_id, role, new_node):
     result = _state_copy(state)
     deployments = result.get("deployments", {})
     deployment = deployments.get(deployment_id)
-    if not isinstance(deployment, dict):
+    if deployment is None:
         raise ValueError(f"deployment not found: {deployment_id}")
+    if not isinstance(deployment, dict):
+        raise TypeError(f"deployment must be an object: {deployment_id}")
     nodes = result.get("nodes", {})
     if new_node not in nodes:
         raise ValueError(f"replacement node not found: {new_node}")
 
-    selected = deployment.get("roles", {}).get(role)
-    if not isinstance(selected, dict):
+    roles = deployment.get("roles", {})
+    if not isinstance(roles, dict):
+        raise TypeError(f"deployment roles must be an object: {deployment_id}")
+    selected = roles.get(role)
+    if selected is None:
         raise ValueError(f"missing deployment role: {deployment_id}/{role}")
+    if not isinstance(selected, dict):
+        raise TypeError(f"deployment role must be an object: {deployment_id}/{role}")
     old_node = selected.get("node")
     if old_node == new_node:
         raise ValueError("replacement node must differ from the current node")
@@ -358,8 +365,10 @@ def deployment_transport_summary(state, deployment_id):
     Ansible implementation yet.
     """
     deployment = state.get("deployments", {}).get(deployment_id)
-    if not isinstance(deployment, dict):
+    if deployment is None:
         raise ValueError(f"deployment not found: {deployment_id}")
+    if not isinstance(deployment, dict):
+        raise TypeError(f"deployment must be an object: {deployment_id}")
 
     selected = deployment.get("transports", {})
     if not isinstance(selected, dict):
@@ -392,8 +401,10 @@ def set_cascade_transports(state, deployment_id, access_transport, backhaul_tran
     """
     result = _state_copy(state)
     deployment = result.get("deployments", {}).get(deployment_id)
-    if not isinstance(deployment, dict):
+    if deployment is None:
         raise ValueError(f"deployment not found: {deployment_id}")
+    if not isinstance(deployment, dict):
+        raise TypeError(f"deployment must be an object: {deployment_id}")
     plan = validate_transport_plan(
         TOPOLOGY_CASCADE, access_transport, backhaul_transport
     )

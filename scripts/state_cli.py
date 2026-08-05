@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import base64
-from copy import deepcopy
 import json
 import os
 import re
@@ -11,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -109,7 +109,7 @@ def read_state():
         raise SystemExit("encrypted Vault state has an invalid structure; expected an object with nodes")
     try:
         assert_canonical_state(state)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise SystemExit(f"Vault state must be migrated to schema v2: {exc}") from exc
     return state
 

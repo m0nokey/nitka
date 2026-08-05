@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-
 VAULT_SCHEMA_VERSION = 2
 
 # These are the only transport selections that existed before deployments
@@ -86,9 +85,12 @@ def migrate_deployment(deployment: dict) -> dict:
         return deployment
 
     roles = deployment.get("roles")
-    if deployment.get("topology") in (None, "") and isinstance(roles, dict):
-        if all(isinstance(roles.get(role), dict) for role in ("ingress", "egress")):
-            deployment["topology"] = "cascade"
+    if (
+        deployment.get("topology") in (None, "")
+        and isinstance(roles, dict)
+        and all(isinstance(roles.get(role), dict) for role in ("ingress", "egress"))
+    ):
+        deployment["topology"] = "cascade"
 
     if deployment.get("topology") == "cascade":
         selected = deployment.get("transports")
@@ -250,21 +252,24 @@ def migrate_state(state: dict) -> dict:
 
 def sync_canonical_state(state: dict) -> dict:
     """Validate an already migrated state before writing it."""
-    assert_canonical_state(state)
+    try:
+        assert_canonical_state(state)
+    except TypeError as exc:
+        raise ValueError(str(exc)) from exc
     return state
 
 
 def assert_canonical_state(state: dict):
     """Reject a pre-v2 state at every runtime read/write boundary."""
     if not isinstance(state, dict):
-        raise ValueError("Vault state must be an object")
+        raise TypeError("Vault state must be an object")
     if state.get("vault_schema_version") != VAULT_SCHEMA_VERSION:
         raise ValueError("Vault state is not schema v2")
     if not isinstance(state.get("nodes"), dict):
-        raise ValueError("Vault state is missing nodes")
+        raise TypeError("Vault state is missing nodes")
     pending_operations = state.get("pending_operations", {})
     if not isinstance(pending_operations, dict):
-        raise ValueError("Vault pending operations must be an object")
+        raise TypeError("Vault pending operations must be an object")
     for node in state.get("nodes", {}).values():
         assert_canonical_node(node)
     for operation in pending_operations.values():
@@ -272,24 +277,24 @@ def assert_canonical_state(state: dict):
             assert_canonical_node(operation["node"])
     deployments = state.get("deployments", {})
     if not isinstance(deployments, dict):
-        raise ValueError("Vault deployments must be an object")
+        raise TypeError("Vault deployments must be an object")
     for deployment in deployments.values():
         if not isinstance(deployment, dict):
-            raise ValueError("Vault deployment must be an object")
+            raise TypeError("Vault deployment must be an object")
         if deployment.get("topology") != "cascade":
             raise ValueError("Vault deployment has an unsupported topology")
         roles = deployment.get("roles")
         if not isinstance(roles, dict):
-            raise ValueError("Vault deployment roles must be an object")
+            raise TypeError("Vault deployment roles must be an object")
         if not all(isinstance(roles.get(role), dict) for role in ("ingress", "egress")):
             raise ValueError("Vault deployment must contain ingress and egress roles")
         transports = deployment.get("transports")
         if not isinstance(transports, dict):
-            raise ValueError("Vault deployment must contain a transports object")
+            raise TypeError("Vault deployment must contain a transports object")
         for plane in ("access", "backhaul"):
             selected = transports.get(plane)
             if not isinstance(selected, dict) or not isinstance(selected.get("transport"), str):
-                raise ValueError(f"Vault deployment transports.{plane} is invalid")
+                raise TypeError(f"Vault deployment transports.{plane} is invalid")
         # Keep schema validation strict without importing transport metadata at
         # module load time.  This also rejects an unimplemented adapter before
         # it can reach Ansible.
@@ -304,12 +309,12 @@ def assert_canonical_state(state: dict):
             raise ValueError(f"Vault deployment transport plan is invalid: {exc}") from exc
         settings = deployment.get("settings", {})
         if not isinstance(settings, dict):
-            raise ValueError("Vault deployment settings must be an object")
+            raise TypeError("Vault deployment settings must be an object")
         if any(key in settings for key in ("ssh_tun", "ingress", "egress")):
             raise ValueError("Vault deployment contains legacy settings")
         services = deployment.get("services", {})
         if not isinstance(services, dict):
-            raise ValueError("Vault deployment services must be an object")
+            raise TypeError("Vault deployment services must be an object")
         if any(key in services for key in ("ssh_tun", "dns", "health")):
             raise ValueError("Vault deployment contains legacy services")
         for role in deployment.get("roles", {}).values():
@@ -326,4 +331,4 @@ def assert_canonical_node(node: dict):
         raise ValueError(f"Vault v2 node contains legacy fields: {', '.join(legacy)}")
     for namespace in ("management", "bootstrap", "access", "topology"):
         if not isinstance(node.get(namespace), dict):
-            raise ValueError(f"Vault v2 node is missing namespace: {namespace}")
+            raise TypeError(f"Vault v2 node is missing namespace: {namespace}")

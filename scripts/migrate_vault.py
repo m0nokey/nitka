@@ -90,5 +90,5 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise SystemExit(f"migration rejected: {exc}") from exc

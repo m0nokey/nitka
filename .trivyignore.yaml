@@ -1,11 +1,12 @@
 misconfigurations:
-  # These legacy cascade endpoints require root at runtime for TUN devices,
+  # These transport endpoints require root at runtime for TUN devices,
   # routes, iptables, sshd and /etc/resolv.conf configuration.
   - id: AVD-DS-0002
     paths:
-      - ansible/roles/cascade_egress/templates/dns/Dockerfile.j2
-      - ansible/roles/cascade_ssh_tun/templates/client/Dockerfile.j2
-      - ansible/roles/cascade_ssh_tun/templates/server/Dockerfile.j2
+      - ansible/roles/topology/cascade/egress/templates/dns/Dockerfile.j2
+      - ansible/roles/transports/backhaul/ssh_tun/templates/client/Dockerfile.j2
+      - ansible/roles/transports/backhaul/ssh_tun/templates/server/Dockerfile.j2
+      - ansible/roles/transports/access/ssh_proxy/templates/Dockerfile.j2
     statement: >-
       Root is required by the TUN client/server runtime; capabilities alone do
       not cover all route, DNS, iptables and sshd setup operations.
