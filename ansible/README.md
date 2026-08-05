@@ -138,10 +138,11 @@ when the node record is deleted.
 
 Restart and removal are also Ansible operations. The controller invokes
 `restart.yml` or `remove.yml`; it does not run Docker commands or delete VPS
-files directly over SSH. Before hardening, the original SSH configuration,
-host keys, and managed APT source file are backed up under
-`/var/lib/nitka/`. Removal stops and removes the Xray Compose project,
-updater timers, Docker packages, and Nitka files; restores the original
-SSH and APT files; removes the Nitka-created `deploy` user; and leaves the
-timezone at UTC. Cleanup refuses to proceed when the original SSH
-configuration backup is missing.
+files directly over SSH. `remove.yml` is deliberately scoped to the selected
+VPN stack: it dispatches only the selected access, topology, and backhaul
+adapters and leaves the system base, Docker, management SSH, updater services,
+and unrelated stacks untouched. The recovery action `cleanup.yml` is separate
+and is used only after an aborted installation; it removes the managed VPS
+base, restores the original SSH and APT files, removes the Nitka-created
+`deploy` user, and deletes Nitka state. Cleanup refuses to proceed when the
+original SSH configuration backup is missing.

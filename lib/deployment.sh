@@ -136,14 +136,14 @@ pending_install_cleanup() {
         password_yaml="$(yaml_scalar "$password")"
         printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_password: $password_yaml" "          ansible_become_password: $password_yaml" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o ConnectionAttempts=1 -o PubkeyAuthentication=no -o PreferredAuthentications=password'" >"$inventory"
         unset password_yaml password
-        inventory_args=(-i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/playbooks/remove.yml")
+        inventory_args=(-i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/playbooks/cleanup.yml")
     else
         private_key_value="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["nodes"][sys.argv[2]]["bootstrap"].get("private_key", ""), end="")' "$candidate" "$node")"
         [[ -n "$private_key_value" ]] || { rm -f "$state" "$candidate" "$extra" "$private_key_path"; rm -rf "$inventory_dir"; return 1; }
         printf '%s' "$private_key_value" >"$private_key_path"
         chmod 600 "$private_key_path"
         printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: $user" "          ansible_port: $port" "          ansible_ssh_private_key_file: $private_key_path" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" >"$inventory"
-        inventory_args=(-i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/playbooks/remove.yml" --private-key "$private_key_path")
+        inventory_args=(-i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/playbooks/cleanup.yml" --private-key "$private_key_path")
     fi
     chmod 600 "$inventory"
     pipeline_start "Cleaning incomplete installation" remove
@@ -156,7 +156,7 @@ pending_install_cleanup() {
         printf '%s' "$management_private_key" >"$private_key_path"
         chmod 600 "$private_key_path"
         printf '%s\n' "---" "all:" "  children:" "    xray_nodes:" "      hosts:" "        $node:" "          ansible_host: $host" "          ansible_user: deploy" "          ansible_port: $management_port" "          ansible_ssh_private_key_file: $private_key_path" "          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o ConnectionAttempts=1 -o IdentitiesOnly=yes'" >"$inventory"
-        inventory_args=(-i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/playbooks/remove.yml" --private-key "$private_key_path")
+        inventory_args=(-i "$inventory" -e "@$extra" "$ROOT_DIR/ansible/playbooks/cleanup.yml" --private-key "$private_key_path")
         if run_ansible_playbook --quiet "${inventory_args[@]}"; then
             rc=0
         else

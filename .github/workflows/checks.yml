@@ -119,7 +119,8 @@ jobs:
             ansible/playbooks/manage_management_ssh.yml \
             ansible/playbooks/rotate_management_ssh.yml \
             ansible/playbooks/restart.yml \
-            ansible/playbooks/remove.yml; do
+            ansible/playbooks/remove.yml \
+            ansible/playbooks/cleanup.yml; do
             ansible-playbook --syntax-check \
               -i 'xray_nodes,' -c local "$playbook"
           done

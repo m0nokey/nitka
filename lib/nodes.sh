@@ -819,13 +819,10 @@ manage_server() {
 
 remove_remote_node() {
     local node="$1" extra_source="${2:-}" topology_role="${3:-}"
-    # Removal remains independent of the pinned management host key.
+    # Stack removal keeps the managed base and needs only one successful pass.
+    # Bootstrap access is a fallback when management SSH is unavailable.
     if run_remove_with_management_key "$node" "$extra_source" "$topology_role"; then
-        # The deploy user cannot remove itself while it is the Ansible user.
-        # The first pass restores the original SSH access; the second pass
-        # removes the deploy account and the remaining Nitka state as root.
-        run_remove_with_bootstrap "$node" "$extra_source" "$topology_role"
-        return $?
+        return 0
     fi
     run_remove_with_bootstrap "$node" "$extra_source" "$topology_role"
 }

@@ -233,7 +233,7 @@ class CascadeRuntimeTests(unittest.TestCase):
         self.assertIn("AccuracySec=1h", os_timer)
 
     def test_full_removal_cleans_cascade_ingress_systemd_units(self):
-        removal = self.read("ansible/playbooks/remove.yml")
+        removal = self.read("ansible/playbooks/cleanup.yml")
         for unit in (
             "cascade-ingress-docker-updater.timer",
             "cascade-ingress-docker-updater.service",
@@ -377,6 +377,16 @@ class CascadeRuntimeTests(unittest.TestCase):
         self.assertLess(egress, capture)
         self.assertLess(capture, ingress)
         self.assertEqual(add.count('run_cascade_playbooks "$deployment_id" "$cascade_state"'), 1)
+
+    def test_stack_removal_does_not_run_a_second_bootstrap_pass(self):
+        nodes = self.read("lib/nodes.sh")
+        removal = nodes[nodes.index("remove_remote_node()") : nodes.index("remove_node()")]
+        self.assertIn(
+            'if run_remove_with_management_key "$node" "$extra_source" "$topology_role"; then',
+            removal,
+        )
+        self.assertIn("return 0", removal)
+        self.assertEqual(removal.count("run_remove_with_bootstrap"), 1)
 
     def test_routing_update_only_deploys_ingress(self):
         nodes = self.read("lib/nodes.sh")

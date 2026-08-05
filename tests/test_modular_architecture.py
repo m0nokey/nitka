@@ -16,6 +16,7 @@ class ModularArchitectureTests(unittest.TestCase):
             "deploy_cascade.yml",
             "manage_access.yml",
             "remove.yml",
+            "cleanup.yml",
         }
         actual = {path.name for path in (ROOT / "ansible/playbooks").glob("*.yml")}
         self.assertTrue(expected <= actual)
@@ -55,6 +56,18 @@ class ModularArchitectureTests(unittest.TestCase):
         self.assertIn("access_transport_operation: remove", remove_playbook)
         self.assertIn("backhaul_transport_operation: remove", remove_playbook)
         self.assertNotIn("/opt/xray", remove_playbook)
+        self.assertNotIn("Remove Nitka updater files", remove_playbook)
+        self.assertNotIn("Remove Docker packages", remove_playbook)
+        self.assertNotIn("Restore the original sshd_config", remove_playbook)
+
+    def test_full_cleanup_is_separate_from_stack_removal(self):
+        cleanup = (ROOT / "ansible/playbooks/cleanup.yml").read_text()
+        deployment = (ROOT / "lib/deployment.sh").read_text()
+        self.assertIn("Remove Nitka updater files", cleanup)
+        self.assertIn("Remove Docker packages", cleanup)
+        self.assertIn("Restore the original sshd_config", cleanup)
+        self.assertIn('"$ROOT_DIR/ansible/playbooks/remove.yml"', deployment)
+        self.assertIn('"$ROOT_DIR/ansible/playbooks/cleanup.yml"', deployment)
 
     def test_canonical_variable_names_are_used_by_adapters(self):
         role_files = list((ROOT / "ansible/roles/transports").rglob("*.yml"))

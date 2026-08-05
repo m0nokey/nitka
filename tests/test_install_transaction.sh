@@ -84,6 +84,13 @@ assert "Save the original sshd_config before installation" in bootstrap
 assert 'menu_option 1 "Resume previous installation"' in entrypoint
 assert 'menu_option 2 "Abort and clean the VPS"' in entrypoint
 assert 'menu_option 3 "Start over after manual cleanup"' in entrypoint
+pending_cleanup = deployment[
+    deployment.index("pending_install_cleanup()") : deployment.index(
+        "recover_pending_installation()"
+    )
+]
+assert '"$ROOT_DIR/ansible/playbooks/cleanup.yml"' in pending_cleanup
+assert '"$ROOT_DIR/ansible/playbooks/remove.yml"' not in pending_cleanup
 
 print("Install transaction and SSH ordering checks passed.")
 PY
