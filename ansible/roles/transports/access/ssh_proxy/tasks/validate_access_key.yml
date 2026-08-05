@@ -1,0 +1,12 @@
+---
+- name: Validate standalone SSH access key
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.username is string
+      - item.username is match('^[a-z][a-z0-9]{7,31}$')
+      - item.authorized_key is string
+      - item.authorized_key | trim is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( .*)?$')
+    fail_msg: >-
+      Each standalone SSH access key must contain a valid username and an
+      ssh-ed25519 public key.

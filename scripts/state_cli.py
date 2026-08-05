@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+from copy import deepcopy
 import json
 import os
 import re
 import secrets
+import string
 import subprocess
 import sys
 import tempfile
@@ -17,14 +19,70 @@ from deployment_logic import (
     CASCADE_RPZ_SOURCES,
     attach_cascade,
     cascade_ansible_vars,
+    deployment_transport_summary,
     normalize_cascade_transport,
+    replace_cascade_node,
+    set_cascade_transports,
 )
 from nacl.public import PrivateKey
 from routing_policy import import_routing_policy
 from state_logic import build_port_mapping, generated_port, generated_vpn_ports
 from transport_registry import validate_access_transport
+from vault_schema import assert_canonical_state, sync_canonical_state
 
 COUNTRIES_FILE = Path(__file__).resolve().parent.parent / "data" / "countries.tsv"
+SSH_USERNAME_PATTERN = re.compile(r"^[a-z][a-z0-9]{7,31}$")
+
+
+def bootstrap_environment(name, default=""):
+    """Read canonical bootstrap variables."""
+    return os.environ.get(f"NITKA_BOOTSTRAP_{name}", default)
+
+
+def ssh_proxy_username(existing):
+    """Generate a portable, non-privileged SSH proxy username."""
+    alphabet = string.ascii_lowercase + string.digits
+    while True:
+        username = secrets.choice(string.ascii_lowercase) + "".join(
+            secrets.choice(alphabet) for _ in range(11)
+        )
+        if username not in existing and SSH_USERNAME_PATTERN.fullmatch(username):
+            return username
+
+
+def management_state(node):
+    return node["management"]
+
+
+def bootstrap_state(node):
+    return node["bootstrap"]
+
+
+def access_state(node):
+    return node["access"]
+
+
+def xray_reality_state(node):
+    return access_state(node)["xray_reality"]
+
+
+def ssh_proxy_state(node):
+    return access_state(node)["ssh_proxy"]
+
+
+def ssh_proxy_access_keys(node):
+    keys = ssh_proxy_state(node).get("access_keys", [])
+    return keys if isinstance(keys, list) else []
+
+
+def new_ssh_proxy_access_key(existing):
+    private_key, public_key = deploy_key()
+    return {
+        "key_id": "ssh-" + secrets.token_hex(6),
+        "username": ssh_proxy_username(existing),
+        "private_key": private_key,
+        "authorized_key": public_key,
+    }
 
 
 def country_codes():
@@ -49,27 +107,74 @@ def read_state():
         raise SystemExit(f"encrypted Vault state is invalid JSON: {exc.msg}") from exc
     if not isinstance(state, dict) or not isinstance(state.get("nodes"), dict):
         raise SystemExit("encrypted Vault state has an invalid structure; expected an object with nodes")
+    try:
+        assert_canonical_state(state)
+    except ValueError as exc:
+        raise SystemExit(f"Vault state must be migrated to schema v2: {exc}") from exc
     return state
 
 
+def pending_operations(state):
+    operations = state.setdefault("pending_operations", {})
+    if not isinstance(operations, dict):
+        raise SystemExit("encrypted Vault state has invalid pending operations")
+    return operations
+
+
+def pending_operation(state, transaction_id):
+    operation = pending_operations(state).get(transaction_id)
+    if not isinstance(operation, dict) or not isinstance(operation.get("node"), dict):
+        raise SystemExit(f"pending installation not found: {transaction_id}")
+    return operation
+
+
 def ip_info(host):
-    for attempt in range(3):
+    """Return display metadata without making deployment depend on a web API."""
+    endpoints = (
+        (f"https://ipinfo.io/{host}", "ipinfo"),
+        (f"https://ipwho.is/{host}", "ipwho"),
+    )
+    for endpoint, service in endpoints:
         try:
             result = subprocess.run(
-                ["curl", "-sSfL", "--tlsv1.3", "--http2", "--proto", "=https",
-                 f"https://ipinfo.io/{host}"], capture_output=True, text=True, timeout=10,
+                [
+                    "curl",
+                    "-sSfL",
+                    "--connect-timeout",
+                    "2",
+                    "--max-time",
+                    "4",
+                    "--tlsv1.3",
+                    "--http2",
+                    "--proto",
+                    "=https",
+                    endpoint,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
                 check=False,
             )
-            if result.returncode == 0 and result.stdout.strip():
-                data = json.loads(result.stdout)
-                org = data.get("org", "N/A")
-                return data.get("country", "N/A"), org.split(" ", 1)[1] if " " in org else org
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+            data = json.loads(result.stdout)
+            country = data.get("country")
+            org = data.get("org")
+            if service == "ipwho":
+                country = data.get("country_code")
+                org = data.get("connection", {}).get("org")
+            if country:
+                provider = (
+                    org.split(" ", 1)[1]
+                    if service == "ipinfo" and isinstance(org, str) and " " in org
+                    else org
+                )
+                return country, provider or "N/A"
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-            pass
-        if attempt < 2:
-            import time
-            time.sleep(3)
-    raise SystemExit("Failed to get IP info")
+            continue
+    # These fields are only used for display. Keep deployment functional when
+    # both metadata services are blocked or temporarily unavailable.
+    return "N/A", "N/A"
 
 
 def reality_keys():
@@ -124,13 +229,20 @@ parser.add_argument(
     "action",
     choices=(
         "count", "names", "extract", "extract-cascade", "mark-deployed",
-        "set-management-key", "set-ssh-host-key", "set-bootstrap",
+        "set-management-key", "set-ssh-host-key", "set-ssh-transport-host-key", "set-bootstrap",
         "set-ssh-mapping", "set-management-user",
+        "repair-access-port",
+        "set-access-transport", "ssh-transport-info",
         "normalize-cascade-transport",
+        "transport-summary",
+        "set-cascade-transports",
         "capture-cascade-transport-keys",
-        "set-dns-profile", "set-local-region", "remove-node", "add-node",
+        "set-dns-profile", "set-local-region", "begin-install", "restore-pending",
+        "sync-pending", "commit-pending", "abort-pending", "pending-list",
+        "remove-node", "add-node",
         "set-cascade-dns-profile", "set-cascade-country-policy",
-        "add-cascade", "remove-cascade", "share-management-key", "add-key", "add-keys", "remove-key", "remove-all-keys",
+        "add-cascade", "replace-cascade-node", "remove-cascade", "share-management-key", "add-key", "add-keys", "remove-key", "remove-all-keys",
+        "add-ssh-key", "add-ssh-keys", "remove-ssh-key",
         "import-routing",
     ),
 )
@@ -138,6 +250,11 @@ parser.add_argument("args", nargs="*")
 parser.add_argument("--bootstrap-key")
 parser.add_argument("--node-role", choices=("single", "ingress", "egress"), default="single")
 parser.add_argument("--server-name", default="github.com")
+parser.add_argument(
+    "--access-transport",
+    choices=("xray-reality", "ssh-proxy", "ssh"),
+    default="xray-reality",
+)
 parser.add_argument(
     "--port-mode",
     choices=("random", "vision-443", "xhttp-443", "manual"),
@@ -175,37 +292,53 @@ elif opts.action == "extract":
     if len(opts.args) != 1 or opts.args[0] not in nodes:
         raise SystemExit("extract requires NODE")
     node = nodes[opts.args[0]]
+    management = management_state(node)
+    bootstrap = bootstrap_state(node)
+    access = access_state(node)
+    xray = xray_reality_state(node)
+    ssh_proxy = ssh_proxy_state(node)
     try:
-        access_transport = validate_access_transport(
-            node.get("access_transport", "xray-reality")
-        )
+        access_transport = validate_access_transport(access.get("transport", "xray-reality"))
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     output = {
-        "xray_state": node["xray"],
-        "xray_access_transport": access_transport,
-        "xray_server_name": node["xray"].get("server_name", "github.com"),
-        "xray_dns_profile": node["xray"].get("dns_filter_profile", "disabled"),
-        "xray_dns_lists": node["xray"].get("dns_filter_lists", []),
-        "xray_local_region_countries": node["xray"].get("local_region_countries", []),
-        "xray_public_host": node["host"],
-        "management_user": node["management_user"],
-        "management_authorized_key": node["management_authorized_key"],
+        "access_xray_state": xray,
+        "access_transport_selection": access_transport,
+        "access_xray_server_name": xray.get("server_name", "github.com"),
+        "access_xray_dns_profile": xray.get("dns_filter_profile", "disabled"),
+        "access_xray_dns_lists": xray.get("dns_filter_lists", []),
+        "access_xray_local_region_countries": xray.get("local_region_countries", []),
+        "access_ssh_proxy_external_port": ssh_proxy.get("port", 0),
+        "access_ssh_proxy_authorized_key": (
+            ssh_proxy_access_keys(node)[0].get("authorized_key", "")
+            if ssh_proxy_access_keys(node) else ""
+        ),
+        "access_ssh_proxy_access_keys": [
+            {
+                "key_id": item.get("key_id", ""),
+                "username": item.get("username", ""),
+                "authorized_key": item.get("authorized_key", ""),
+            }
+            for item in ssh_proxy_access_keys(node)
+        ],
+        "access_xray_public_host": node["host"],
+        "system_base_management_user": management["user"],
+        "system_base_management_authorized_key": management["authorized_key"],
         "system_base_deploy_user": "deploy",
-        "system_base_deploy_authorized_key": node["management_authorized_key"],
-        "management_private_key": node["management_private_key"],
-        "system_base_harden_ssh_initial_user": node.get("management_user", "deploy"),
+        "system_base_deploy_authorized_key": management["authorized_key"],
+        "system_base_management_private_key": management["private_key"],
+        "system_base_harden_ssh_initial_user": management.get("user", "deploy"),
         "system_base_harden_ssh_preserve_users": list(dict.fromkeys(
             user for user in (
-                node.get("management_user", "deploy"),
-                node.get("bootstrap_user"),
-                *(node.get("preserved_management_users") or []),
+                management.get("user", "deploy"),
+                bootstrap.get("user"),
+                *(management.get("preserved_users") or []),
             ) if user and user != "root"
         )),
-        "ssh_port": node["ssh_port"],
-        "management_port": node["management_port"],
-        "system_base_ssh_host_public_key": node.get("ssh_host_public_key", ""),
-        "system_base_ssh_host_fingerprint": node.get("ssh_host_fingerprint", ""),
+        "system_base_management_sshd_port": management["sshd_port"],
+        "system_base_management_port": management["port"],
+        "system_base_ssh_host_public_key": management.get("host_public_key", ""),
+        "system_base_ssh_host_fingerprint": management.get("host_fingerprint", ""),
     }
     json.dump(output, sys.stdout, indent=2)
     print()
@@ -214,21 +347,23 @@ elif opts.action == "mark-deployed":
     if len(opts.args) != 1 or opts.args[0] not in nodes:
         raise SystemExit("mark-deployed requires NODE")
     node = nodes[opts.args[0]]
-    node["bootstrap_private_key"] = ""
+    management = management_state(node)
+    bootstrap = bootstrap_state(node)
+    xray = xray_reality_state(node)
+    bootstrap["private_key"] = ""
     mapping = node.get("port_mapping", {})
     nat_enabled = mapping.get("nat", {}).get("enabled")
     if nat_enabled is True:
         management_port = mapping.get("ports", {}).get("management_ssh", {}).get(
-            "external", node["management_port"]
+            "external", management["port"]
         )
     else:
-        management_port = node["ssh_port"]
-    node["management_port"] = management_port
-    xray = node.get("xray", {})
+        management_port = management["sshd_port"]
+    management["port"] = management_port
     node["port_mapping"] = build_port_mapping(
-        bootstrap_external=node.get("bootstrap_ssh_port"),
+        bootstrap_external=bootstrap.get("port"),
         management_external=management_port,
-        sshd_internal=node["ssh_port"],
+        sshd_internal=management["sshd_port"],
         services={
             "xray_reality": xray.get("vision_port"),
             "xray_xhttp": xray.get("xhttp_port"),
@@ -250,11 +385,12 @@ elif opts.action == "set-management-key":
     if len(opts.args) != 3 or opts.args[0] not in nodes:
         raise SystemExit("set-management-key requires NODE PRIVATE_KEY PUBLIC_KEY")
     node = nodes[opts.args[0]]
-    node["management_private_key"] = Path(opts.args[1]).read_text(encoding="utf-8")
-    node["management_authorized_key"] = Path(opts.args[2]).read_text(encoding="utf-8").strip()
+    management = management_state(node)
+    management["private_key"] = Path(opts.args[1]).read_text(encoding="utf-8")
+    management["authorized_key"] = Path(opts.args[2]).read_text(encoding="utf-8").strip()
     try:
-        node["management_fingerprint"] = ssh_public_key_fingerprint(
-            node["management_authorized_key"]
+        management["fingerprint"] = ssh_public_key_fingerprint(
+            management["authorized_key"]
         )
     except (OSError, subprocess.SubprocessError, IndexError) as exc:
         raise SystemExit("invalid management public key") from exc
@@ -267,24 +403,40 @@ elif opts.action == "set-ssh-host-key":
         raise SystemExit("invalid SSH host public key")
     if not re.fullmatch(r"SHA256:[A-Za-z0-9+/=]+", fingerprint):
         raise SystemExit("invalid SSH host fingerprint")
-    node = nodes[opts.args[0]]
-    node["ssh_host_public_key"] = public_key
-    node["ssh_host_fingerprint"] = fingerprint
+    management = management_state(nodes[opts.args[0]])
+    management["host_public_key"] = public_key
+    management["host_fingerprint"] = fingerprint
+elif opts.action == "set-ssh-transport-host-key":
+    if len(opts.args) != 3 or opts.args[0] not in nodes:
+        raise SystemExit(
+            "set-ssh-transport-host-key requires NODE PUBLIC_KEY_FILE FINGERPRINT"
+        )
+    public_key = Path(opts.args[1]).read_text(encoding="utf-8").strip()
+    fingerprint = opts.args[2].strip()
+    if not re.fullmatch(r"ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?", public_key):
+        raise SystemExit("invalid SSH proxy host public key")
+    if not re.fullmatch(r"SHA256:[A-Za-z0-9+/=]+", fingerprint):
+        raise SystemExit("invalid SSH proxy host fingerprint")
+    transport = ssh_proxy_state(nodes[opts.args[0]])
+    transport["host_public_key"] = public_key
+    transport["host_fingerprint"] = fingerprint
 elif opts.action == "set-bootstrap":
     if len(opts.args) != 3 or opts.args[0] not in nodes:
         raise SystemExit("set-bootstrap requires NODE USER PORT")
-    password = os.environ.get("XRAY_BOOTSTRAP_PASSWORD", "")
+    password = bootstrap_environment("PASSWORD")
     if not password:
-        raise SystemExit("set-bootstrap requires XRAY_BOOTSTRAP_PASSWORD")
+        raise SystemExit("set-bootstrap requires NITKA_BOOTSTRAP_PASSWORD")
     node = nodes[opts.args[0]]
-    node["bootstrap_user"] = opts.args[1]
-    node["bootstrap_ssh_port"] = int(opts.args[2])
-    node["bootstrap_password"] = password
-    node["management_port"] = node["bootstrap_ssh_port"]
-    xray = node.get("xray", {})
+    bootstrap = bootstrap_state(node)
+    management = management_state(node)
+    xray = xray_reality_state(node)
+    bootstrap["user"] = opts.args[1]
+    bootstrap["port"] = int(opts.args[2])
+    bootstrap["password"] = password
+    management["port"] = bootstrap["port"]
     node["port_mapping"] = build_port_mapping(
-        bootstrap_external=node["bootstrap_ssh_port"],
-        management_external=node["management_port"],
+        bootstrap_external=bootstrap["port"],
+        management_external=management["port"],
         sshd_internal=None,
         services={
             "xray_reality": xray.get("vision_port"),
@@ -298,11 +450,13 @@ elif opts.action == "set-ssh-mapping":
     node = nodes[opts.args[0]]
     external_port = int(opts.args[1])
     internal_port = int(opts.args[2])
-    node["management_port"] = external_port
-    node["ssh_port"] = internal_port
-    xray = node.get("xray", {})
+    management = management_state(node)
+    bootstrap = bootstrap_state(node)
+    xray = xray_reality_state(node)
+    management["port"] = external_port
+    management["sshd_port"] = internal_port
     node["port_mapping"] = build_port_mapping(
-        bootstrap_external=node.get("bootstrap_ssh_port"),
+        bootstrap_external=bootstrap.get("port"),
         management_external=external_port,
         sshd_internal=internal_port,
         services={
@@ -317,16 +471,116 @@ elif opts.action == "set-management-user":
     if opts.args[1] != "deploy":
         raise SystemExit("management user must be deploy")
     node = nodes[opts.args[0]]
-    previous = node.get("management_user")
+    management = management_state(node)
+    previous = management.get("user")
     if previous and previous != "deploy":
-        preserved = node.setdefault("preserved_management_users", [])
+        preserved = management.setdefault("preserved_users", [])
         if previous not in preserved:
             preserved.append(previous)
-    node["management_user"] = "deploy"
+    management["user"] = "deploy"
+elif opts.action == "repair-access-port":
+    if len(opts.args) != 1 or opts.args[0] not in nodes:
+        raise SystemExit("repair-access-port requires NODE")
+    node = nodes[opts.args[0]]
+    if access_state(node).get("transport") == "ssh-proxy":
+        transport = ssh_proxy_state(node)
+        management = management_state(node)
+        bootstrap = bootstrap_state(node)
+        xray = xray_reality_state(node)
+        reserved = {
+            value
+            for value in (
+                bootstrap.get("port"),
+                management.get("sshd_port"),
+                management.get("port"),
+                xray.get("vision_port"),
+                xray.get("xhttp_port"),
+            )
+            if isinstance(value, int)
+        }
+        current = transport.get("port")
+        if not isinstance(current, int) or current in reserved:
+            transport["port"] = generated_port(reserved)
+elif opts.action == "set-access-transport":
+    if len(opts.args) != 2 or opts.args[0] not in nodes:
+        raise SystemExit("set-access-transport requires NODE TRANSPORT")
+    try:
+        transport = validate_access_transport(opts.args[1])
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if transport not in ("xray-reality", "ssh-proxy"):
+        raise SystemExit("standalone access transport must be xray-reality or ssh-proxy")
+    node = nodes[opts.args[0]]
+    access = access_state(node)
+    if transport == "ssh-proxy":
+        ssh_proxy = ssh_proxy_state(node)
+        keys = ssh_proxy_access_keys(node)
+        if not keys:
+            keys.append(new_ssh_proxy_access_key(set()))
+        ssh_proxy["access_keys"] = keys
+        if not ssh_proxy.get("port"):
+            used_ports = {
+                value
+                for value in (
+                    bootstrap_state(node).get("port"),
+                    management_state(node).get("sshd_port"),
+                    management_state(node).get("port"),
+                    xray_reality_state(node).get("vision_port"),
+                    xray_reality_state(node).get("xhttp_port"),
+                )
+                if isinstance(value, int)
+            }
+            ssh_proxy["port"] = generated_port(used_ports)
+        ssh_proxy["enabled"] = True
+    access["transport"] = transport
+elif opts.action == "ssh-transport-info":
+    if len(opts.args) != 1 or opts.args[0] not in nodes:
+        raise SystemExit("ssh-transport-info requires NODE")
+    node = nodes[opts.args[0]]
+    transport = ssh_proxy_state(node)
+    keys = ssh_proxy_access_keys(node)
+    if access_state(node).get("transport") != "ssh-proxy" or not keys:
+        raise SystemExit("SSH transport is not enabled for this node")
+    access_keys = []
+    for key in keys:
+        access_key = dict(key)
+        try:
+            access_key["fingerprint"] = ssh_public_key_fingerprint(
+                access_key["authorized_key"]
+            )
+        except (KeyError, OSError, subprocess.SubprocessError, IndexError):
+            access_key["fingerprint"] = ""
+        access_keys.append(access_key)
+    json.dump(
+        {
+            "host": node["host"],
+            "port": transport["port"],
+            "access_keys": access_keys,
+            "host_fingerprint": transport.get("host_fingerprint", ""),
+        },
+        sys.stdout,
+        indent=2,
+    )
+    print()
+    raise SystemExit(0)
 elif opts.action == "normalize-cascade-transport":
     if len(opts.args) != 1:
         raise SystemExit("normalize-cascade-transport requires DEPLOYMENT_ID")
     state = normalize_cascade_transport(state, opts.args[0])
+elif opts.action == "transport-summary":
+    if len(opts.args) != 1:
+        raise SystemExit("transport-summary requires DEPLOYMENT_ID")
+    json.dump(deployment_transport_summary(state, opts.args[0]), sys.stdout, indent=2)
+    print()
+    raise SystemExit(0)
+elif opts.action == "set-cascade-transports":
+    if len(opts.args) != 3:
+        raise SystemExit(
+            "set-cascade-transports requires DEPLOYMENT_ID ACCESS_TRANSPORT BACKHAUL_TRANSPORT"
+        )
+    state = set_cascade_transports(
+        state, opts.args[0], opts.args[1], opts.args[2]
+    )
 elif opts.action == "capture-cascade-transport-keys":
     if len(opts.args) != 2:
         raise SystemExit(
@@ -349,14 +603,14 @@ elif opts.action == "capture-cascade-transport-keys":
         host_fingerprint = ssh_public_key_fingerprint(host_public)
     except (OSError, subprocess.SubprocessError, IndexError) as exc:
         raise SystemExit("Could not read Cascade transport keypair") from exc
-    ssh_tun = deployment.setdefault("settings", {}).setdefault("ssh_tun", {})
-    ssh_tun.update({
-        "ssh_tun_private_key": auth_private,
-        "ssh_tun_public_key": auth_public,
-        "ssh_tun_fingerprint": auth_fingerprint,
-        "ssh_tun_host_private_key": host_private,
-        "ssh_tun_host_public_key": host_public,
-        "ssh_tun_host_fingerprint": host_fingerprint,
+    backhaul_ssh_tun = deployment.setdefault("settings", {}).setdefault("backhaul_ssh_tun", {})
+    backhaul_ssh_tun.update({
+        "auth_private_key": auth_private,
+        "auth_public_key": auth_public,
+        "auth_fingerprint": auth_fingerprint,
+        "host_private_key": host_private,
+        "host_public_key": host_public,
+        "host_fingerprint": host_fingerprint,
     })
 elif opts.action == "set-dns-profile":
     if len(opts.args) != 2 or opts.args[0] not in nodes:
@@ -364,7 +618,7 @@ elif opts.action == "set-dns-profile":
     profile = opts.args[1]
     if profile not in ("disabled", "minimal", "optimal", "security", "full", "maximum", "custom"):
         raise SystemExit("unsupported DNS protection profile")
-    node_xray = nodes[opts.args[0]].setdefault("xray", {})
+    node_xray = xray_reality_state(nodes[opts.args[0]])
     node_xray["dns_filter_profile"] = profile
     if profile == "custom":
         node_xray["dns_filter_lists"] = [item for item in opts.dns_lists.split(",") if item]
@@ -378,7 +632,7 @@ elif opts.action == "set-cascade-dns-profile":
         raise SystemExit("unsupported Cascade DNS protection profile")
     deployment = state["deployments"][opts.args[0]]
     settings = deployment.setdefault("settings", {})
-    egress = settings.setdefault("egress", {})
+    egress = settings.setdefault("topology_cascade_egress", {})
     egress["rpz_profile"] = profile
     if profile == "disabled":
         egress["rpz_sources"] = []
@@ -414,7 +668,7 @@ elif opts.action == "set-cascade-country-policy":
         if not countries:
             raise SystemExit("enabled Cascade country policy requires at least one country")
     state["deployments"][opts.args[0]].setdefault("settings", {}).setdefault(
-        "ingress", {}
+        "topology_cascade_ingress", {}
     )["local_region_countries"] = countries
 elif opts.action == "set-local-region":
     if len(opts.args) != 2 or opts.args[0] not in nodes:
@@ -434,15 +688,87 @@ elif opts.action == "set-local-region":
             raise SystemExit(f"unsupported country code: {', '.join(invalid)}")
         if not countries:
             raise SystemExit("enabled local-region policy requires at least one country")
-    nodes[opts.args[0]].setdefault("xray", {})["local_region_countries"] = countries
+    xray_reality_state(nodes[opts.args[0]])["local_region_countries"] = countries
 elif opts.action == "import-routing":
     if len(opts.args) != 2:
         raise SystemExit("import-routing requires NODE ROUTING_FILE")
     state = import_routing_policy(state, opts.args[0], opts.args[1])
+elif opts.action == "begin-install":
+    if len(opts.args) != 2 or opts.args[0] not in nodes:
+        raise SystemExit("begin-install requires NODE TRANSACTION_ID")
+    node_name, transaction_id = opts.args
+    operations = pending_operations(state)
+    if transaction_id in operations:
+        raise SystemExit(f"pending installation already exists: {transaction_id}")
+    candidate = nodes.pop(node_name)
+    operations[transaction_id] = {
+        "kind": "install",
+        "phase": "prepared",
+        "node_name": node_name,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "node": candidate,
+    }
+elif opts.action == "restore-pending":
+    if len(opts.args) != 1:
+        raise SystemExit("restore-pending requires TRANSACTION_ID")
+    operation = pending_operation(state, opts.args[0])
+    state["nodes"][operation["node_name"]] = deepcopy(operation["node"])
+elif opts.action == "sync-pending":
+    if len(opts.args) != 2:
+        raise SystemExit("sync-pending requires TRANSACTION_ID PHASE")
+    transaction_id, phase = opts.args
+    operation = pending_operation(state, transaction_id)
+    node_name = operation["node_name"]
+    if node_name not in nodes:
+        raise SystemExit("sync-pending input does not contain the pending node")
+    operation["node"] = deepcopy(nodes[node_name])
+    operation["phase"] = phase
+    del nodes[node_name]
+elif opts.action == "commit-pending":
+    if len(opts.args) != 1:
+        raise SystemExit("commit-pending requires TRANSACTION_ID")
+    transaction_id = opts.args[0]
+    operation = pending_operation(state, transaction_id)
+    state["nodes"][operation["node_name"]] = operation["node"]
+    del state["pending_operations"][transaction_id]
+elif opts.action == "abort-pending":
+    if len(opts.args) != 1:
+        raise SystemExit("abort-pending requires TRANSACTION_ID")
+    transaction_id = opts.args[0]
+    pending_operation(state, transaction_id)
+    del state["pending_operations"][transaction_id]
+elif opts.action == "pending-list":
+    json.dump(
+        [
+            {
+                "transaction_id": transaction_id,
+                "kind": operation.get("kind", ""),
+                "phase": operation.get("phase", ""),
+                "node_name": operation.get("node_name", ""),
+                "host": operation.get("node", {}).get("host", ""),
+            }
+            for transaction_id, operation in pending_operations(state).items()
+            if isinstance(operation, dict)
+        ],
+        sys.stdout,
+        indent=2,
+    )
+    print()
+    raise SystemExit(0)
 elif opts.action == "remove-node":
     if len(opts.args) != 1 or opts.args[0] not in nodes:
         raise SystemExit("remove-node requires NODE")
-    del nodes[opts.args[0]]
+    node_name = opts.args[0]
+    referenced = {
+        role.get("node")
+        for deployment in state.get("deployments", {}).values()
+        if isinstance(deployment, dict)
+        for role in deployment.get("roles", {}).values()
+        if isinstance(role, dict)
+    }
+    if node_name in referenced:
+        raise SystemExit("cannot remove a node referenced by a Cascade deployment")
+    del nodes[node_name]
 elif opts.action == "add-node":
     if len(opts.args) != 2:
         raise SystemExit("add-node requires NAME HOST")
@@ -469,63 +795,84 @@ elif opts.action == "add-node":
             bootstrap_fingerprint = ssh_public_key_fingerprint(bootstrap_public)
         except (OSError, subprocess.SubprocessError, IndexError) as exc:
             raise SystemExit("invalid bootstrap private key") from exc
-    bootstrap_password = os.environ.get("XRAY_BOOTSTRAP_PASSWORD", "")
-    bootstrap_port = int(os.environ.get("XRAY_BOOTSTRAP_PORT", "22"))
-    bootstrap_user = os.environ.get("XRAY_BOOTSTRAP_USER", "root")
-    reality_private, reality_public = reality_keys()
-    server_name = opts.server_name.strip().lower()
-    if (
-        len(server_name) > 253
-        or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+", server_name)
-        or any(len(label) > 63 for label in server_name.split("."))
-    ):
-        raise SystemExit("server name must be a valid ASCII hostname")
+    bootstrap_password = bootstrap_environment("PASSWORD")
+    bootstrap_port = int(bootstrap_environment("PORT", "22"))
+    bootstrap_user = bootstrap_environment("USER", "root")
     used_ports = set()
     ssh_port = generated_port(used_ports)
-    manual_ports = None
-    if opts.port_mode == "manual":
-        manual_ports = (opts.vision_port, opts.xhttp_port)
-    try:
-        vision_port, xhttp_port = generated_vpn_ports(used_ports, opts.port_mode, manual_ports)
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
-    vision_uuid = str(uuid.uuid4())
-    xray_state = {
-        "vision_port": vision_port, "xhttp_port": xhttp_port,
-        "port_mode": opts.port_mode,
-        "reality_private_key": reality_private,
-        "reality_public_key": reality_public,
-        "reality_short_id": secrets.token_hex(8),
-        "server_name": server_name,
-        "dns_filter_profile": opts.dns_profile,
-        "dns_filter_lists": [item for item in opts.dns_lists.split(",") if item],
-        "local_region_countries": [],
-        "access_keys": [{
-            "key_id": "key-" + vision_uuid.replace("-", "")[:8],
-            "vision_uuid": vision_uuid,
-            "xhttp_uuid": str(uuid.uuid4()),
-        }],
-    }
-    if opts.node_role == "egress":
+    ssh_proxy = {}
+    if opts.access_transport == "ssh-proxy":
+        if opts.node_role != "single":
+            raise SystemExit("SSH access transport is supported for standalone nodes only")
+        ssh_access_key = new_ssh_proxy_access_key(set())
+        ssh_proxy = {
+            "access_keys": [ssh_access_key],
+            "port": generated_port(used_ports),
+            "host_public_key": "",
+            "host_fingerprint": "",
+            "enabled": True,
+        }
         xray_state = {}
+    else:
+        reality_private, reality_public = reality_keys()
+        server_name = opts.server_name.strip().lower()
+        if (
+            len(server_name) > 253
+            or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+", server_name)
+            or any(len(label) > 63 for label in server_name.split("."))
+        ):
+            raise SystemExit("server name must be a valid ASCII hostname")
+        manual_ports = None
+        if opts.port_mode == "manual":
+            manual_ports = (opts.vision_port, opts.xhttp_port)
+        try:
+            vision_port, xhttp_port = generated_vpn_ports(used_ports, opts.port_mode, manual_ports)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        vision_uuid = str(uuid.uuid4())
+        xray_state = {
+            "vision_port": vision_port, "xhttp_port": xhttp_port,
+            "port_mode": opts.port_mode,
+            "reality_private_key": reality_private,
+            "reality_public_key": reality_public,
+            "reality_short_id": secrets.token_hex(8),
+            "server_name": server_name,
+            "dns_filter_profile": opts.dns_profile,
+            "dns_filter_lists": [item for item in opts.dns_lists.split(",") if item],
+            "local_region_countries": [],
+            "access_keys": [{
+                "key_id": "key-" + vision_uuid.replace("-", "")[:8],
+                "vision_uuid": vision_uuid,
+                "xhttp_uuid": str(uuid.uuid4()),
+            }],
+        }
+        if opts.node_role == "egress":
+            xray_state = {}
     nodes[name] = {
         "name": name,
         "host": host,
         "country": country,
         "provider": provider,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "management_user": "deploy",
-        "management_private_key": private,
-        "management_authorized_key": public,
-        "management_fingerprint": ssh_public_key_fingerprint(public),
-        "bootstrap_private_key": bootstrap_private,
-        "bootstrap_public_key": bootstrap_public,
-        "bootstrap_fingerprint": bootstrap_fingerprint,
-        "bootstrap_password": bootstrap_password,
-        "bootstrap_user": bootstrap_user,
-        "bootstrap_ssh_port": bootstrap_port,
-        "ssh_port": ssh_port,
-        "management_port": bootstrap_port,
+        "management": {
+            "user": "deploy",
+            "private_key": private,
+            "authorized_key": public,
+            "fingerprint": ssh_public_key_fingerprint(public),
+            "sshd_port": ssh_port,
+            "port": bootstrap_port,
+            "host_public_key": "",
+            "host_fingerprint": "",
+            "preserved_users": [],
+        },
+        "bootstrap": {
+            "user": bootstrap_user,
+            "private_key": bootstrap_private,
+            "public_key": bootstrap_public,
+            "fingerprint": bootstrap_fingerprint,
+            "password": bootstrap_password,
+            "port": bootstrap_port,
+        },
         "port_mapping": build_port_mapping(
             bootstrap_external=bootstrap_port,
             management_external=bootstrap_port,
@@ -536,16 +883,21 @@ elif opts.action == "add-node":
             } if xray_state else {},
             source="state_cli",
         ),
-        "role": opts.node_role,
-        "access_transport": "xray-reality",
-        "ssh_host_public_key": "",
-        "ssh_host_fingerprint": "",
-        "xray": xray_state,
+        "topology": {"role": opts.node_role},
+        "access": {
+            "transport": validate_access_transport(opts.access_transport),
+            "xray_reality": xray_state,
+            "ssh_proxy": ssh_proxy,
+        },
     }
 elif opts.action == "add-cascade":
     if len(opts.args) != 3:
         raise SystemExit("add-cascade requires DEPLOYMENT_ID INGRESS_NODE EGRESS_NODE")
     state = attach_cascade(state, opts.args[0], opts.args[1], opts.args[2])
+elif opts.action == "replace-cascade-node":
+    if len(opts.args) != 3:
+        raise SystemExit("replace-cascade-node requires DEPLOYMENT_ID ROLE NODE")
+    state = replace_cascade_node(state, opts.args[0], opts.args[1], opts.args[2])
 elif opts.action == "remove-cascade":
     if len(opts.args) != 1:
         raise SystemExit("remove-cascade requires DEPLOYMENT_ID")
@@ -574,16 +926,51 @@ elif opts.action == "share-management-key":
         raise SystemExit("share-management-key requires SOURCE_NODE DESTINATION_NODE")
     source = nodes[opts.args[0]]
     destination = nodes[opts.args[1]]
-    destination["management_private_key"] = source["management_private_key"]
-    destination["management_authorized_key"] = source["management_authorized_key"]
-    destination["management_fingerprint"] = source.get("management_fingerprint", "")
+    source_management = management_state(source)
+    destination_management = management_state(destination)
+    destination_management["private_key"] = source_management["private_key"]
+    destination_management["authorized_key"] = source_management["authorized_key"]
+    destination_management["fingerprint"] = source_management.get("fingerprint", "")
+elif opts.action in ("add-ssh-key", "add-ssh-keys", "remove-ssh-key"):
+    if len(opts.args) < 1 or opts.args[0] not in nodes:
+        raise SystemExit(f"{opts.action} requires NODE")
+    node = nodes[opts.args[0]]
+    if access_state(node).get("transport") != "ssh-proxy":
+        raise SystemExit("SSH access keys require the standalone SSH transport")
+    transport = ssh_proxy_state(node)
+    keys = ssh_proxy_access_keys(node)
+    if opts.action in ("add-ssh-key", "add-ssh-keys"):
+        if opts.action == "add-ssh-key":
+            count = 1
+        elif len(opts.args) == 2 and opts.args[1].isdigit():
+            count = int(opts.args[1])
+            if not 1 <= count <= 50:
+                raise SystemExit("SSH access key count must be between 1 and 50")
+        else:
+            raise SystemExit("add-ssh-keys requires NODE COUNT")
+        usernames = {item.get("username") for item in keys}
+        for _ in range(count):
+            key = new_ssh_proxy_access_key(usernames)
+            usernames.add(key["username"])
+            keys.append(key)
+    else:
+        if len(opts.args) != 2:
+            raise SystemExit("remove-ssh-key requires NODE KEY_ID")
+        key_id = opts.args[1]
+        if len(keys) <= 1:
+            raise SystemExit("cannot delete the last SSH proxy access key")
+        remaining = [key for key in keys if key.get("key_id") != key_id]
+        if len(remaining) == len(keys):
+            raise SystemExit(f"SSH access key not found: {key_id}")
+        transport["access_keys"] = remaining
 elif opts.action in ("add-key", "add-keys", "remove-key", "remove-all-keys"):
     if len(opts.args) < 1:
         raise SystemExit(f"{opts.action} requires NODE")
     node = nodes.get(opts.args[0])
     if node is None:
         raise SystemExit(f"node not found: {opts.args[0]}")
-    keys = node.setdefault("xray", {}).setdefault("access_keys", [])
+    xray = xray_reality_state(node)
+    keys = xray.setdefault("access_keys", [])
     if opts.action in ("add-key", "add-keys"):
         if opts.action == "add-key":
             count = 1
@@ -601,14 +988,15 @@ elif opts.action in ("add-key", "add-keys", "remove-key", "remove-all-keys"):
                 "xhttp_uuid": str(uuid.uuid4()),
             })
     elif opts.action == "remove-all-keys":
-        node["xray"]["access_keys"] = []
+        xray["access_keys"] = []
     else:
         if len(opts.args) != 2:
             raise SystemExit("remove-key requires NODE KEY_ID")
         key_id = opts.args[1]
-        node["xray"]["access_keys"] = [key for key in keys if key["key_id"] != key_id]
-        if len(node["xray"]["access_keys"]) == len(keys):
+        xray["access_keys"] = [key for key in keys if key["key_id"] != key_id]
+        if len(xray["access_keys"]) == len(keys):
             raise SystemExit(f"key not found: {key_id}")
 
+sync_canonical_state(state)
 json.dump(state, sys.stdout, indent=2)
 print()

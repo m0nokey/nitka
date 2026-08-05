@@ -1,0 +1,416 @@
+---
+- name: Detect canonical Xray directory and migration source
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop:
+    - { name: canonical, path: "{{ access_xray_dir }}" }
+    - { name: migration_source, path: "{{ access_xray_migration_source_dir }}" }
+  register: access_xray_directory_stats
+  changed_when: false
+
+- name: Reject conflicting Xray application directories
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (
+          (access_xray_directory_stats.results[0].stat.exists | bool)
+          and (access_xray_directory_stats.results[1].stat.exists | bool)
+        )
+    fail_msg: >-
+      Both {{ access_xray_dir }} and {{ access_xray_migration_source_dir }} exist.
+      Move or remove the migration source manually before continuing; Nitka
+      will never overwrite one application directory with another.
+
+- name: Create canonical Xray parent directory for migration
+  ansible.builtin.file:
+    path: "{{ access_xray_dir | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - access_xray_directory_stats.results[1].stat.exists | bool
+    - not access_xray_directory_stats.results[0].stat.exists | bool
+  changed_when: true
+
+- name: Migrate Xray application directory to canonical path
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ access_xray_migration_source_dir }}"
+      - "{{ access_xray_dir }}"
+  when:
+    - access_xray_directory_stats.results[1].stat.exists | bool
+    - not access_xray_directory_stats.results[0].stat.exists | bool
+  changed_when: true
+
+- name: Snapshot current Xray stack before deployment
+  become: true
+  ansible.builtin.shell: |
+    set -eu
+    source_dir="{{ access_xray_dir }}"
+    backup_root="/var/lib/nitka/backup/xray"
+    latest="$backup_root.latest"
+    if [ -f "$source_dir/compose.yml" ]; then
+      backup="$backup_root.$(date -u +%Y%m%dT%H%M%SZ)"
+      install -d -m 0700 "$backup"
+      cp -a "$source_dir/." "$backup/"
+      printf '%s\n' "$backup" > "$latest"
+      chmod 0600 "$latest"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: true
+
+- name: Validate local encrypted runtime state
+  ansible.builtin.assert:
+    that:
+      - access_xray_state is mapping
+      - access_xray_state.vision_port is number
+      - access_xray_state.xhttp_port is number
+      - system_base_management_sshd_port is number
+      - access_xray_state.reality_private_key | length > 0
+      - access_xray_state.reality_public_key | length > 0
+      - access_xray_state.reality_short_id | length > 0
+      - access_xray_state.access_keys is sequence
+    fail_msg: >-
+      Pass the encrypted local Xray state and SSH port with -e @state.yml.
+
+- name: Select DNS protection profile
+  ansible.builtin.set_fact:
+    access_xray_dns_profile: >-
+      {{ access_xray_state.dns_filter_profile | default('disabled') }}
+
+- name: Validate DNS protection profile
+  ansible.builtin.assert:
+    that:
+      - access_xray_dns_profile in access_xray_dns_profiles
+    fail_msg: "Unsupported DNS protection profile: {{ access_xray_dns_profile }}"
+
+- name: Select local-region traffic policy
+  ansible.builtin.set_fact:
+    access_xray_local_region_countries: >-
+      {{
+        access_xray_state.local_region_countries
+        | default([]) | map('lower') | list
+      }}
+
+- name: Validate local-region traffic policy
+  ansible.builtin.assert:
+    that:
+      - access_xray_local_region_countries is sequence
+      - item is match('^[a-z]{2}$')
+    fail_msg: "Unsupported local-region country code: {{ item }}"
+  loop: "{{ access_xray_local_region_countries }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Select DNS protection sources
+  ansible.builtin.set_fact:
+    access_xray_dns_source_names: >-
+      {{
+        access_xray_state.dns_filter_lists | default([])
+        if access_xray_dns_profile == 'custom'
+        else access_xray_dns_profiles[access_xray_dns_profile].source_names
+      }}
+
+- name: Validate custom DNS protection sources
+  ansible.builtin.assert:
+    that:
+      - access_xray_dns_profile != 'custom' or (access_xray_dns_source_names | length > 0)
+    fail_msg: >-
+      Custom DNS protection must include at least one source.
+
+- name: Validate DNS protection source names
+  ansible.builtin.assert:
+    that:
+      - item in access_xray_dns_sources
+    fail_msg: "Unsupported DNS protection source: {{ item }}"
+  loop: "{{ access_xray_dns_source_names }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Build selected DNS protection sources
+  ansible.builtin.set_fact:
+    access_xray_dns_selected_sources: >-
+      {{ access_xray_dns_source_names | map('extract', access_xray_dns_sources) | list }}
+
+- name: Calculate selected DNS protection entries
+  ansible.builtin.set_fact:
+    access_xray_dns_selected_entries: >-
+      {{ access_xray_dns_selected_sources
+         | map(attribute='entries')
+         | map('regex_replace', '[^0-9]', '')
+         | map('int')
+         | list
+         | sum }}
+
+- name: Estimate DNS protection memory
+  ansible.builtin.set_fact:
+    access_xray_dns_estimated_rpz_memory_mb: >-
+      {{
+        (
+          (access_xray_dns_selected_entries | int)
+          * (access_xray_dns_reference_memory_mb | int)
+          / (access_xray_dns_reference_entries | int)
+        ) | round(0, 'ceil') | int
+      }}
+
+- name: Calculate DNS runtime memory
+  ansible.builtin.set_fact:
+    access_xray_dns_runtime_memory_mb: >-
+      {{
+        (access_xray_dns_estimated_rpz_memory_mb | int)
+        + (access_xray_dns_memory_headroom_mb | int)
+      }}
+
+- name: Calculate DNS protection resource floor
+  ansible.builtin.set_fact:
+    access_xray_dns_required_vcpus: >-
+      {{ access_xray_dns_profiles[access_xray_dns_profile].min_vcpus | int }}
+    access_xray_dns_required_memory_mb: >-
+      {{
+        [
+          access_xray_dns_profiles[access_xray_dns_profile].min_memory_mb | int,
+          (
+            (
+              (access_xray_dns_runtime_memory_mb | int)
+              + (access_xray_dns_memory_round_mb | int)
+              - 1
+            ) // (access_xray_dns_memory_round_mb | int)
+          ) * (access_xray_dns_memory_round_mb | int)
+        ] | max
+      }}
+
+- name: Validate VPS resources for DNS protection
+  ansible.builtin.assert:
+    that:
+      - (ansible_facts.processor_vcpus | int) >= (access_xray_dns_required_vcpus | int)
+      - (ansible_facts.memtotal_mb | int) >= (access_xray_dns_required_memory_mb | int)
+    fail_msg: >-
+      DNS profile '{{ access_xray_dns_profile }}' requires at least
+      {{ access_xray_dns_required_vcpus }} vCPU and
+      {{ access_xray_dns_required_memory_mb }} MB RAM.
+      The selected sources contain approximately
+      {{ access_xray_dns_selected_entries }} entries
+      and require about {{ access_xray_dns_estimated_rpz_memory_mb }} MB for RPZ data.
+      Detected {{ ansible_facts.processor_vcpus }} vCPU and
+      {{ ansible_facts.memtotal_mb }} MB RAM.
+  when: access_xray_dns_profile != 'disabled'
+
+- name: Create Xray directory
+  ansible.builtin.file:
+    path: "{{ access_xray_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Create Unbound directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ access_xray_unbound_dir }}", mode: "0750" }
+  when: access_xray_dns_profile != 'disabled'
+
+- name: Render Unbound configuration
+  ansible.builtin.template:
+    src: unbound.conf.j2
+    dest: "{{ access_xray_unbound_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: access_xray_unbound_config_render
+  when: access_xray_dns_profile != 'disabled'
+
+- name: Render Unbound Dockerfile
+  ansible.builtin.template:
+    src: unbound.Dockerfile.j2
+    dest: "{{ access_xray_unbound_dockerfile_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: access_xray_dns_profile != 'disabled'
+
+- name: Validate access key pairs
+  ansible.builtin.assert:
+    that:
+      - item.key_id is string
+      - item.vision_uuid is string
+      - item.xhttp_uuid is string
+      - item.vision_uuid != item.xhttp_uuid
+    fail_msg: "Every access key must contain two different UUIDs."
+  loop: "{{ access_xray_state.access_keys }}"
+  loop_control:
+    label: "{{ item.key_id | default('unnamed') }}"
+
+- name: Render Docker Compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ access_xray_compose_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart Xray
+
+- name: Build Unbound image when sources changed
+  ansible.builtin.shell: |
+    set -euo pipefail
+    state_dir="{{ access_xray_dir }}/.build-fingerprints"
+    state_file="$state_dir/unbound.sha256"
+    mkdir -p "$state_dir"
+    fingerprint="$({
+      sha256sum compose.yml
+      sha256sum unbound/Dockerfile
+      sha256sum unbound/unbound.conf
+    } | sha256sum | sed -nE 's/^([0-9a-fA-F]+)[[:space:]].*/\1/p')"
+    old_fingerprint="$(cat "$state_file" 2>/dev/null || true)"
+    if docker image inspect local/nitka-unbound:latest >/dev/null 2>&1 \
+      && [ "$fingerprint" = "$old_fingerprint" ]; then
+      exit 0
+    fi
+    docker compose --file compose.yml build unbound
+    printf '%s\n' "$fingerprint" > "$state_file"
+    echo "xray-unbound-built"
+  args:
+    chdir: "{{ access_xray_dir }}"
+    executable: /bin/bash
+  register: access_xray_unbound_build
+  changed_when: "'xray-unbound-built' in access_xray_unbound_build.stdout"
+  when: access_xray_dns_profile != 'disabled'
+
+- name: Inspect Unbound container
+  community.docker.docker_container_info:
+    name: unbound
+  register: access_xray_unbound_container_info
+  when: access_xray_dns_profile != 'disabled'
+
+- name: Select Unbound container state
+  ansible.builtin.set_fact:
+    access_xray_unbound_running: >-
+      {{
+        (access_xray_unbound_container_info.exists | default(false) | bool)
+        and (
+          access_xray_unbound_container_info.container.State.Running
+          | default(false) | bool
+        )
+      }}
+  when: access_xray_dns_profile != 'disabled'
+
+- name: Validate running Unbound configuration
+  community.docker.docker_container_exec:
+    container: unbound
+    command: unbound-checkconf /opt/unbound/etc/unbound/unbound.conf
+  changed_when: false
+  when:
+    - access_xray_dns_profile != 'disabled'
+    - access_xray_unbound_running | bool
+
+- name: Validate Unbound configuration in disposable container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ access_xray_compose_path }}"
+      - run
+      - --rm
+      - --no-deps
+      - unbound
+      - unbound-checkconf
+      - /opt/unbound/etc/unbound/unbound.conf
+  changed_when: false
+  when:
+    - access_xray_dns_profile != 'disabled'
+    - not access_xray_unbound_running | bool
+
+- name: Render Xray configuration
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ access_xray_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Xray
+
+- name: Validate Xray configuration in a disposable container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - -v
+      - "{{ access_xray_config_path }}:/etc/xray/config.json:ro"
+      - "{{ access_xray_image }}"
+      - run
+      - -test
+      - -config=/etc/xray/config.json
+  changed_when: false
+
+- name: Validate REALITY target
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network
+      - host
+      - "{{ access_xray_image }}"
+      - tls
+      - ping
+      - "{{ access_xray_server_name }}"
+  changed_when: false
+
+- name: Restart Unbound after configuration validation
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ access_xray_compose_path }}"
+      - up
+      - --detach
+      - --force-recreate
+      - --no-deps
+      - unbound
+  changed_when: true
+  when:
+    - access_xray_dns_profile != 'disabled'
+    - access_xray_unbound_config_render.changed
+
+- name: Ensure Xray stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ access_xray_dir }}"
+    files:
+      - compose.yml
+    state: present
+    remove_orphans: true
+
+- name: Wait for Xray container healthcheck
+  community.docker.docker_container_info:
+    name: "{{ access_xray_container_name }}"
+  register: access_xray_container_info
+  until:
+    - access_xray_container_info.exists | bool
+    - access_xray_container_info.container.State.Running | default(false) | bool
+    - access_xray_container_info.container.State.Health.Status | default('') == 'healthy'
+  retries: 30
+  delay: 2
+
+- name: Wait for Unbound container healthcheck
+  community.docker.docker_container_info:
+    name: "{{ access_xray_unbound_container_name }}"
+  register: access_xray_unbound_health_info
+  until:
+    - access_xray_unbound_health_info.exists | bool
+    - access_xray_unbound_health_info.container.State.Running | default(false) | bool
+    - access_xray_unbound_health_info.container.State.Health.Status | default('') == 'healthy'
+  retries: 30
+  delay: 2
+  when: access_xray_dns_profile != 'disabled'

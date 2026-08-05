@@ -8,8 +8,10 @@ from datetime import datetime
 
 try:
     from scripts.render_nodes import node_diagnostics
+    from scripts.table import format_table
 except ModuleNotFoundError:
     from render_nodes import node_diagnostics
+    from table import format_table
 
 
 def date_value(value):
@@ -27,7 +29,7 @@ def node_status(node, diagnostics=None):
 
 def cascade_node_diagnostics(role, node):
     probe_node = dict(node)
-    probe_node["role"] = role
+    probe_node["topology"] = {**probe_node.get("topology", {}), "role": role}
     return node_diagnostics(probe_node)
 
 
@@ -45,16 +47,6 @@ def deployment_data(state, deployment_id):
             raise TypeError(f"deployment node not found: {deployment_id}/{role}")
         result.append((role, node))
     return result
-
-
-def format_table(headers, rows, indent="  "):
-    values = [tuple(str(value) for value in headers)]
-    values.extend(tuple(str(value) for value in row) for row in rows)
-    widths = [max(len(row[index]) for row in values) for index in range(len(headers))]
-    return [
-        indent + "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
-        for row in values
-    ]
 
 
 def render(state, deployment_id, diagnostics=None):

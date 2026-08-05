@@ -15,6 +15,56 @@ menu_control() {
     printf '%s%s.%s %s%s%s\n' "$COLOR_LINE" "$1" "$COLOR_RESET" "$COLOR_TEXT" "$2" "$COLOR_RESET"
 }
 
+# Render tab-separated rows using widths calculated from every row.
+ui_print_table() {
+    local indent="${1:-}" gap="${2:-  }" separator="${3:-0}"
+    shift 3
+    local row index column line current_width column_length column_value
+    local -a rows=("$@")
+    local -a widths=()
+    local -a columns=()
+    local column_count=0
+
+    for row in "${rows[@]}"; do
+        IFS=$'\t' read -r -a columns <<<"$row"
+        (( ${#columns[@]} > column_count )) && column_count=${#columns[@]}
+        for ((index = 0; index < ${#columns[@]}; index++)); do
+            current_width=${widths[index]:-0}
+            column_value="${columns[index]:-}"
+            column_length=${#column_value}
+            if (( current_width < column_length )); then
+                widths[index]=$column_length
+            fi
+        done
+    done
+
+    for ((row = 0; row < ${#rows[@]}; row++)); do
+        IFS=$'\t' read -r -a columns <<<"${rows[$row]}"
+        line="$indent"
+        for ((index = 0; index < column_count; index++)); do
+            if (( index > 0 )); then
+                line+="$gap"
+            fi
+            if (( index == column_count - 1 )); then
+                line+="${columns[index]:-}"
+            else
+                printf -v column '%-*s' "${widths[index]}" "${columns[index]:-}"
+                line+="$column"
+            fi
+        done
+        printf '%s\n' "$line"
+        if [[ "$separator" == 1 && $row -lt $((${#rows[@]} - 1)) ]]; then
+            line="$indent"
+            for ((index = 0; index < column_count; index++)); do
+                (( index > 0 )) && line+="$gap"
+                printf -v column '%*s' "${widths[index]}" ''
+                line+="${column// /-}"
+            done
+            printf '%s\n' "$line"
+        fi
+    done
+}
+
 clear_screen() {
     MENU_NUMERIC_OPTIONS=''
     CURRENT_INPUT_HINT=''

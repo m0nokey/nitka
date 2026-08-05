@@ -1,0 +1,3 @@
+---
+- name: Restore the previous SSH TUN configuration
+  ansible.builtin.include_tasks: main.yml

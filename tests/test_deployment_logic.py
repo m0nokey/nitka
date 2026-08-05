@@ -1,13 +1,13 @@
-import base64
 import copy
 import unittest
 
+from scripts.vault_schema import migrate_state
 from scripts.deployment_logic import (
-    BACKEND_XRAY,
-    TRANSPORT_EXISTING_XRAY,
     attach_cascade,
     cascade_ansible_vars,
     cascade_deployment,
+    deployment_transport_summary,
+    set_cascade_transports,
     validate_deployments,
 )
 
@@ -17,8 +17,20 @@ class DeploymentLogicTests(unittest.TestCase):
     def state():
         return {
             "nodes": {
-                "ingress-node": {"host": "192.0.2.10", "xray": {"access_keys": []}},
-                "egress-node": {"host": "192.0.2.20", "xray": {"access_keys": []}},
+                "ingress-node": {
+                    "host": "192.0.2.10",
+                    "management": {"user": "deploy", "authorized_key": "ssh-ed25519 ingress"},
+                    "bootstrap": {"user": "root"},
+                    "access": {"transport": "xray-reality", "xray_reality": {"access_keys": []}, "ssh_proxy": {}},
+                    "topology": {"role": "single"},
+                },
+                "egress-node": {
+                    "host": "192.0.2.20",
+                    "management": {"user": "deploy", "authorized_key": "ssh-ed25519 egress"},
+                    "bootstrap": {"user": "root"},
+                    "access": {"transport": "xray-reality", "xray_reality": {"access_keys": []}, "ssh_proxy": {}},
+                    "topology": {"role": "single"},
+                },
             }
         }
 
@@ -33,14 +45,45 @@ class DeploymentLogicTests(unittest.TestCase):
                 "backhaul": {"transport": "ssh-tun"},
             },
         )
-        self.assertEqual(deployment["roles"]["ingress"]["backend"], BACKEND_XRAY)
-        self.assertEqual(
-            deployment["roles"]["egress"]["transport"], TRANSPORT_EXISTING_XRAY
+        self.assertEqual(deployment["roles"], {
+            "ingress": {"node": "ingress-node"},
+            "egress": {"node": "egress-node"},
+        })
+        self.assertTrue(deployment["services"]["backhaul_ssh_tun"]["enabled"])
+        self.assertNotEqual(deployment["settings"]["backhaul_ssh_tun"]["port"], 22)
+        self.assertGreaterEqual(deployment["settings"]["backhaul_ssh_tun"]["port"], 20000)
+        self.assertLessEqual(deployment["settings"]["backhaul_ssh_tun"]["port"], 60000)
+
+    def test_transport_summary_keeps_access_and_backhaul_independent(self):
+        state = self.state()
+        state = attach_cascade(state, "cascade-1", "ingress-node", "egress-node")
+
+        summary = deployment_transport_summary(state, "cascade-1")
+
+        self.assertEqual(summary["access"]["transport"], "xray-reality")
+        self.assertTrue(summary["access"]["implemented"])
+        self.assertEqual(summary["backhaul"]["transport"], "ssh-tun")
+        self.assertTrue(summary["backhaul"]["implemented"])
+
+    def test_transport_migration_is_validated_and_keeps_other_deployment_data(self):
+        state = self.state()
+        state = attach_cascade(state, "cascade-1", "ingress-node", "egress-node")
+        original_roles = copy.deepcopy(state["deployments"]["cascade-1"]["roles"])
+
+        migrated = set_cascade_transports(
+            state, "cascade-1", "xray-reality", "ssh-tun"
         )
-        self.assertTrue(deployment["services"]["ssh_tun"]["enabled"])
-        self.assertNotEqual(deployment["settings"]["ssh_tun"]["port"], 22)
-        self.assertGreaterEqual(deployment["settings"]["ssh_tun"]["port"], 20000)
-        self.assertLessEqual(deployment["settings"]["ssh_tun"]["port"], 60000)
+
+        self.assertEqual(
+            migrated["deployments"]["cascade-1"]["transports"],
+            {
+                "access": {"transport": "xray-reality"},
+                "backhaul": {"transport": "ssh-tun"},
+            },
+        )
+        self.assertEqual(migrated["deployments"]["cascade-1"]["roles"], original_roles)
+        with self.assertRaisesRegex(ValueError, "not implemented"):
+            set_cascade_transports(state, "cascade-1", "naiveproxy", "ssh-tun")
 
     def test_cascade_replaces_invalid_tun_transport_automatically(self):
         state = {
@@ -69,19 +112,18 @@ class DeploymentLogicTests(unittest.TestCase):
                 },
             },
         }
+        state = migrate_state(state)
         state = attach_cascade(state, "cascade-1", "ingress-node", "egress-node")
-        state["deployments"]["cascade-1"]["settings"]["ssh_tun"]["port"] = 22
+        state["deployments"]["cascade-1"]["settings"]["backhaul_ssh_tun"]["port"] = 22
 
         variables = cascade_ansible_vars(state, "cascade-1", "/state/nitka/cascade")
-        self.assertNotEqual(variables["cascade_ssh_tun_ssh_port"], 22)
-        self.assertGreaterEqual(variables["cascade_ssh_tun_ssh_port"], 1025)
-        self.assertLessEqual(variables["cascade_ssh_tun_ssh_port"], 65535)
+        self.assertNotEqual(variables["backhaul_ssh_tun_ssh_port"], 22)
+        self.assertGreaterEqual(variables["backhaul_ssh_tun_ssh_port"], 1025)
+        self.assertLessEqual(variables["backhaul_ssh_tun_ssh_port"], 65535)
 
-        state["project_env_b64"] = base64.b64encode(
-            b"ssh_tun_port=31847\n"
-        ).decode()
+        state["deployments"]["cascade-1"]["settings"]["backhaul_ssh_tun"]["port"] = 31847
         variables = cascade_ansible_vars(state, "cascade-1", "/state/nitka/cascade")
-        self.assertEqual(variables["cascade_ssh_tun_ssh_port"], 31847)
+        self.assertEqual(variables["backhaul_ssh_tun_ssh_port"], 31847)
 
     def test_attach_preserves_nodes_and_does_not_mutate_input(self):
         state = self.state()
@@ -150,63 +192,68 @@ class DeploymentLogicTests(unittest.TestCase):
                 },
             }
         }
+        state = migrate_state(state)
         state = attach_cascade(state, "cascade-1", "ingress-node", "egress-node")
 
         variables = cascade_ansible_vars(state, "cascade-1", "/state/nitka/cascade")
 
         self.assertEqual(variables["system_base_deploy_user"], "deploy")
         self.assertEqual(
-            variables["cascade_ingress_deploy_authorized_key"],
+            variables["topology_cascade_ingress_deploy_authorized_key"],
             "ssh-ed25519 legacy-ingress",
         )
         self.assertEqual(
-            variables["cascade_egress_remote_dir"],
+            variables["topology_cascade_egress_remote_dir"],
             "/opt/nitka/cascade/egress",
         )
         self.assertEqual(
-            variables["cascade_ingress_xray_reality_uuid"],
+            variables["access_xray_reality_uuid"],
             "11111111-1111-4111-8111-111111111111",
         )
         self.assertEqual(
-            [key["key_id"] for key in variables["cascade_ingress_xray_access_keys"]],
+            [key["key_id"] for key in variables["access_xray_access_keys"]],
             ["key-one", "key-two"],
         )
         self.assertEqual(
-            variables["cascade_ssh_tun_public_host"],
+            variables["backhaul_ssh_tun_public_host"],
             "192.0.2.20",
         )
         self.assertEqual(
-            variables["cascade_ingress_access_transport"], "xray-reality"
+            variables["topology_cascade_ingress_access_transport"], "xray-reality"
         )
         self.assertEqual(
-            variables["cascade_ingress_backhaul_transport"], "ssh-tun"
+            variables["topology_cascade_ingress_backhaul_transport"], "ssh-tun"
         )
         self.assertEqual(
-            variables["cascade_egress_backhaul_transport"], "ssh-tun"
+            variables["topology_cascade_egress_backhaul_transport"], "ssh-tun"
         )
         self.assertEqual(
-            variables["cascade_ingress_harden_ssh_preserve_users"],
+            variables["topology_cascade_transport_bindings"][1]["endpoint"], "client"
+        )
+        self.assertEqual(
+            variables["backhaul_ssh_tun_client_service_name"], "ssh_tun_client"
+        )
+        self.assertEqual(
+            variables["backhaul_ssh_tun_server_service_name"], "ssh_tun_server"
+        )
+        self.assertEqual(
+            variables["topology_cascade_ingress_harden_ssh_preserve_users"],
             ["legacy-ingress-user", "legacy-bootstrap"],
         )
         self.assertEqual(
-            variables["cascade_ingress_xray_local_region_countries"], []
+            variables["access_xray_local_region_countries"], []
         )
         self.assertEqual(
-            variables["cascade_egress_harden_ssh_preserve_users"],
+            variables["topology_cascade_egress_harden_ssh_preserve_users"],
             ["legacy-egress-user"],
         )
         self.assertEqual(
-            [source["name"] for source in variables["cascade_egress_unbound_rpz_sources"]],
+            [source["name"] for source in variables["topology_cascade_egress_unbound_rpz_sources"]],
             ["urlhaus", "hagezi-tif-mini", "threatfox", "hagezi-dyndns"],
         )
 
-    def test_cascade_maps_legacy_transport_port_and_separate_keys(self):
+    def test_cascade_maps_backhaul_port_and_separate_keys(self):
         state = {
-            "ssh_tun_port": 31847,
-            "ssh_tun_private_key_b64": "-----BEGIN OPENSSH PRIVATE KEY----- auth",
-            "ssh_tun_public_key": "ssh-ed25519 AAAA auth",
-            "ssh_tun_host_private_key_b64": "-----BEGIN OPENSSH PRIVATE KEY----- host",
-            "ssh_tun_host_public_key": "ssh-ed25519 AAAA host",
             "nodes": {
                 "ingress-node": {
                     "host": "192.0.2.10",
@@ -232,24 +279,73 @@ class DeploymentLogicTests(unittest.TestCase):
                 },
             },
         }
+        state = migrate_state(state)
         state = attach_cascade(state, "cascade-1", "ingress-node", "egress-node")
+        state["deployments"]["cascade-1"]["settings"]["backhaul_ssh_tun"].update({
+            "port": 31847,
+            "auth_private_key": "-----BEGIN OPENSSH PRIVATE KEY----- auth",
+            "auth_public_key": "ssh-ed25519 AAAA auth",
+            "host_private_key": "-----BEGIN OPENSSH PRIVATE KEY----- host",
+            "host_public_key": "ssh-ed25519 AAAA host",
+        })
 
         variables = cascade_ansible_vars(state, "cascade-1", "/state/nitka/cascade")
 
-        self.assertEqual(variables["cascade_ssh_tun_ssh_port"], 31847)
-        self.assertEqual(variables["cascade_ssh_tun_container_port"], 22)
+        self.assertEqual(variables["backhaul_ssh_tun_ssh_port"], 31847)
+        self.assertEqual(variables["backhaul_ssh_tun_container_port"], 22)
         self.assertEqual(
-            variables["cascade_ssh_tun_auth_private_key"],
+            variables["backhaul_ssh_tun_auth_private_key"],
             "-----BEGIN OPENSSH PRIVATE KEY----- auth",
         )
         self.assertEqual(
-            variables["cascade_ssh_tun_host_private_key"],
+            variables["backhaul_ssh_tun_host_private_key"],
             "-----BEGIN OPENSSH PRIVATE KEY----- host",
         )
         self.assertEqual(
-            variables["cascade_ssh_tun_host_public_key"],
+            variables["backhaul_ssh_tun_host_public_key"],
             "ssh-ed25519 AAAA host",
         )
+
+    def test_legacy_cascade_without_transport_block_renders_after_migration(self):
+        state = self.state()
+        state["nodes"]["ingress-node"]["access"]["xray_reality"].update({
+            "vision_port": 443,
+            "xhttp_port": 23457,
+            "reality_private_key": "private-reality-key",
+            "reality_public_key": "public-reality-key",
+            "reality_short_id": "0123456789abcdef",
+            "server_name": "example.com",
+            "access_keys": [{
+                "vision_uuid": "11111111-1111-4111-8111-111111111111",
+                "xhttp_uuid": "22222222-2222-4222-8222-222222222222",
+            }],
+        })
+        state["deployments"] = {
+            "cascade-legacy": {
+                "topology": "cascade",
+                "roles": {
+                    "ingress": {"node": "ingress-node"},
+                    "egress": {"node": "egress-node"},
+                },
+                "settings": {"ssh_tun": {"port": 31847}},
+                "services": {"ssh_tun": {"enabled": True}},
+            }
+        }
+
+        migrated = migrate_state(state)
+        variables = cascade_ansible_vars(
+            migrated, "cascade-legacy", "/state/nitka/cascade"
+        )
+
+        self.assertEqual(
+            variables["topology_cascade_ingress_access_transport"],
+            "xray-reality",
+        )
+        self.assertEqual(
+            variables["topology_cascade_ingress_backhaul_transport"],
+            "ssh-tun",
+        )
+        self.assertEqual(variables["backhaul_ssh_tun_ssh_port"], 31847)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,27 @@
+---
+- name: Restart standalone SSH proxy service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ access_ssh_proxy_compose_path }}"
+      - up
+      - --detach
+      - --force-recreate
+      - --no-deps
+      - "{{ access_ssh_proxy_service_name }}"
+  args:
+    chdir: "{{ access_ssh_proxy_dir }}"
+  changed_when: true
+
+- name: Verify restarted standalone SSH proxy service
+  community.docker.docker_container_info:
+    name: "{{ access_ssh_proxy_container_name }}"
+  register: access_ssh_proxy_restart_container
+  until:
+    - access_ssh_proxy_restart_container.exists | bool
+    - access_ssh_proxy_restart_container.container.State.Running | default(false) | bool
+    - access_ssh_proxy_restart_container.container.State.Health.Status | default('') == 'healthy'
+  retries: 60
+  delay: 2

@@ -7,6 +7,13 @@ trap 'rm -rf "$TEST_HOME"' EXIT
 TMPDIR="$TEST_HOME/runtime"
 mkdir -m 700 "$TMPDIR"
 export TMPDIR
+RUNTIME_TMP_DIR="$TMPDIR"
+STATE_DIR="$TEST_HOME/state"
+SYSTEM_BACKUP_DIR="$TEST_HOME/system-backups"
+USER_BACKUP_DIR="$TEST_HOME/user-backups"
+HOST_STATE_DIR="$STATE_DIR"
+VAULT_BACKUP_KEEP_COUNT=20
+mkdir -m 700 "$STATE_DIR" "$SYSTEM_BACKUP_DIR" "$USER_BACKUP_DIR"
 
 clear_screen() { :; }
 sleep() { :; }

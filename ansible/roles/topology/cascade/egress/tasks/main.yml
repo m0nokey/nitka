@@ -1,0 +1,83 @@
+- name: Create remote deployment tree
+  ansible.builtin.file:
+    path: "{{ topology_cascade_egress_remote_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - dns
+    - dns/unbound.conf.d
+    - dns/rpz
+
+- name: Render docker compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/compose.yml"
+    mode: "0644"
+  notify: Restart egress stack
+
+- name: Render unbound Dockerfile
+  ansible.builtin.template:
+    src: dns/Dockerfile.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/Dockerfile"
+    mode: "0644"
+  notify: Restart egress stack
+
+- name: Render local Cascade ad and tracking RPZ
+  ansible.builtin.template:
+    src: dns/cascade-ads-tracking.rpz.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/rpz/cascade-ads-tracking.rpz"
+    mode: "0644"
+  notify: Restart egress stack
+
+- name: Render unbound dockerignore
+  ansible.builtin.copy:
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/.dockerignore"
+    mode: "0644"
+    content: |
+      *
+      !Dockerfile
+      !rpz
+      !rpz/cascade-ads-tracking.rpz
+  notify: Restart egress stack
+
+- name: Render unbound config
+  ansible.builtin.template:
+    src: unbound.conf.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/unbound.conf"
+    mode: "0644"
+  notify: Restart egress stack
+
+- name: Render unbound server config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/00-server.conf.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/unbound.conf.d/00-server.conf"
+    mode: "0644"
+  notify: Restart egress stack
+
+- name: Render unbound forward config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/10-forward.conf.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/unbound.conf.d/10-forward.conf"
+    mode: "0644"
+  notify: Restart egress stack
+
+- name: Render unbound remote-control config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/20-remote-control.conf.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/unbound.conf.d/20-remote-control.conf"
+    mode: "0644"
+  notify: Restart egress stack
+
+- name: Render unbound statistics config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/30-stats.conf.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/unbound.conf.d/30-stats.conf"
+    mode: "0644"
+  notify: Restart egress stack
+
+- name: Render unbound RPZ config
+  ansible.builtin.template:
+    src: dns/unbound.conf.d/40-rpz.conf.j2
+    dest: "{{ topology_cascade_egress_remote_dir }}/dns/unbound.conf.d/40-rpz.conf"
+    mode: "0644"
+  notify: Restart egress stack

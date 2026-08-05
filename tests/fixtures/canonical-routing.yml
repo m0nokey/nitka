@@ -1,0 +1,11 @@
+topology_cascade_ingress_clash_tcp_concurrent: false
+access_xray_reality_proxy_domains_first:
+  - domain:first.example
+access_xray_reality_proxy_domains: >-
+  {{ access_xray_reality_proxy_domains_first }}
+access_xray_reality_direct_domains:
+  - domain:direct.example
+access_xray_xhttp_direct_domains:
+  - full:api.direct.example
+access_xray_dns_direct_servers:
+  - address: 1.1.1.1

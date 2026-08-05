@@ -1,0 +1,27 @@
+---
+- name: Restart standalone Xray service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ access_xray_compose_path }}"
+      - up
+      - --detach
+      - --force-recreate
+      - --no-deps
+      - "{{ access_xray_container_name }}"
+  args:
+    chdir: "{{ access_xray_dir }}"
+  changed_when: true
+
+- name: Verify restarted standalone Xray service
+  community.docker.docker_container_info:
+    name: "{{ access_xray_container_name }}"
+  register: access_xray_restart_container
+  until:
+    - access_xray_restart_container.exists | bool
+    - access_xray_restart_container.container.State.Running | default(false) | bool
+    - access_xray_restart_container.container.State.Health.Status | default('') == 'healthy'
+  retries: 60
+  delay: 2

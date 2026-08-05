@@ -1,0 +1,46 @@
+Protocol 2
+Port {{ access_ssh_proxy_internal_port }}
+ListenAddress 0.0.0.0
+HostKey /etc/ssh/host_keys/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+
+AllowUsers {{ access_ssh_proxy_access_keys | map(attribute='username') | join(' ') }}
+AuthorizedKeysFile /var/ssh/%u/authorized_keys
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitRootLogin no
+PermitEmptyPasswords no
+StrictModes yes
+
+LoginGraceTime 10
+MaxAuthTries 3
+MaxSessions 2
+MaxStartups 5:30:20
+IgnoreRhosts yes
+HostbasedAuthentication no
+PermitUserEnvironment no
+PermitUserRC no
+PermitTTY no
+PermitTunnel no
+AllowTcpForwarding yes
+PermitOpen any
+AllowAgentForwarding no
+GatewayPorts no
+X11Forwarding no
+Compression no
+TCPKeepAlive no
+ClientAliveInterval 20
+ClientAliveCountMax 3
+UseDNS no
+AddressFamily inet
+PrintMotd no
+RekeyLimit 512M 1h
+HostKeyAlgorithms ssh-ed25519
+Ciphers aes256-gcm@openssh.com
+MACs hmac-sha2-512-etm@openssh.com
+KexAlgorithms {{ access_ssh_proxy_kex_algorithms | replace(' ', '') }}
+LogLevel ERROR
+Subsystem sftp /bin/false

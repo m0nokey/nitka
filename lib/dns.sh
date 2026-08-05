@@ -172,16 +172,22 @@ dns_custom_memory_floor() {
 }
 
 country_name_for_code() {
-    local code="${1^^}"
-    awk -F '\t' -v code="$code" '$1 == code { print $2; exit }' "$COUNTRIES_FILE"
+    local code="${1^^}" country name
+    while IFS=$'\t' read -r country name _; do
+        [[ "$country" == "$code" ]] || continue
+        printf '%s\n' "$name"
+        return 0
+    done <"$COUNTRIES_FILE"
 }
 
 country_matches() {
-    local query="${1,,}"
-    awk -F '\t' -v query="$query" '
-        BEGIN { IGNORECASE = 1 }
-        $0 !~ /^#/ && (query == "*" || tolower($1) == query || index(tolower($2), query) > 0) { print }
-    ' "$COUNTRIES_FILE"
+    local query="${1,,}" country name
+    while IFS=$'\t' read -r country name _; do
+        [[ -n "$country" && "$country" != \#* ]] || continue
+        if [[ "$query" == '*' || "${country,,}" == "$query" || "${name,,}" == *"$query"* ]]; then
+            printf '%s\t%s\n' "$country" "$name"
+        fi
+    done <"$COUNTRIES_FILE"
 }
 
 local_region_has_country() {
@@ -221,7 +227,7 @@ local_region_selected_summary() {
 select_local_region_countries() {
     local query="" choice index code name status page=0 page_size=20 page_count start end input_options
     local search_action next_action previous_action apply_action action_base
-    local -a matches=()
+    local -a matches=() table_rows=()
     while true; do
         clear_screen
         menu_heading "Block countries"
@@ -240,11 +246,13 @@ select_local_region_countries() {
             printf 'Countries (page %d/%d)\n' "$((page + 1))" "$page_count"
             printf '%s\n' "Select a number to toggle a country. [ON] means it will be blocked."
             echo
+            table_rows=()
             for ((index = start; index < end; index++)); do
                 IFS=$'\t' read -r code name <<<"${matches[$index]}"
                 if local_region_has_country "${code,,}"; then status="ON"; else status="-"; fi
-                printf '%d. %-42s [%s] (%s)\n' "$((index - start + 1))" "$name" "$status" "${code^^}"
+                table_rows+=("$((index - start + 1))."$'\t'"$name"$'\t'"[$status]"$'\t'"(${code^^})")
             done
+            ui_print_table "  " "  " 0 "${table_rows[@]}"
             echo
             action_base=$page_size
             search_action=$((action_base + 1))
@@ -266,11 +274,13 @@ select_local_region_countries() {
                 start=0
                 end=${#matches[@]}
                 ((end > 30)) && end=30
+                table_rows=()
                 for ((index = start; index < end; index++)); do
                     IFS=$'\t' read -r code name <<<"${matches[$index]}"
                     if local_region_has_country "${code,,}"; then status="ON"; else status="-"; fi
-                    printf '%d. %-42s [%s] (%s)\n' "$((index + 1))" "$name" "$status" "${code^^}"
+                    table_rows+=("$((index + 1))."$'\t'"$name"$'\t'"[$status]"$'\t'"(${code^^})")
                 done
+                ui_print_table "  " "  " 0 "${table_rows[@]}"
                 if ((${#matches[@]} > 30)); then printf '%s\n' "      More matches exist; refine the search."; fi
             fi
             echo
@@ -336,6 +346,7 @@ select_custom_dns_profile() {
         hagezi-gambling-medium hagezi-gambling-full hagezi-social
         hagezi-safesearch hagezi-anti-piracy
     )
+    local -a table_rows=()
     if [[ "${CASCADE_DNS_MENU:-0}" == 1 ]]; then
         sources+=(cascade-local-ads-tracking)
     fi
@@ -350,12 +361,13 @@ select_custom_dns_profile() {
         printf '%s\n' "Choose any lists you need. Select at least one list."
         printf '%s\n' "Large threat feeds are mutually exclusive in practice."
         echo
+        table_rows=()
         for index in "${!sources[@]}"; do
             source="${sources[$index]}"
             if dns_custom_has_source "$source"; then status="ON"; else status="OFF"; fi
-            printf '%d. %-48s [%s] %s entries\n' \
-                "$((index + 1))" "$(dns_source_label "$source")" "$status" "$(dns_source_entries "$source")"
+            table_rows+=("$((index + 1))."$'\t'"$(dns_source_label "$source")"$'\t'"[$status]"$'\t'"$(dns_source_entries "$source") entries")
         done
+        ui_print_table "  " "  " 0 "${table_rows[@]}"
         entries="$(dns_custom_entries)"
         rpz_memory="$(dns_custom_estimated_rpz_memory)"
         memory="$(dns_custom_memory_floor)"
@@ -424,12 +436,13 @@ select_dns_profile() {
         printf '%s\n' "Optional. Blocks malware, phishing, scams, ads, trackers, and telemetry."
         printf '%s\n' "Current: ${DNS_FILTER_CURRENT_PROFILE:-disabled}"
         echo
-        printf '%s1.%s %-9s %-43s [%s]\n' "$COLOR_LINE" "$COLOR_RESET" "Disabled" "No blocking" "available"
-        printf '%s2.%s %-9s %-43s [%s]\n' "$COLOR_LINE" "$COLOR_RESET" "Minimal" "Malware protection" "$(dns_profile_is_available minimal && printf available || printf 'not available')"
-        printf '%s3.%s %-9s %-43s [%s]\n' "$COLOR_LINE" "$COLOR_RESET" "Optimal" "Malware, phishing and scams" "$(dns_profile_is_available optimal && printf available || printf 'not available')"
-        printf '%s4.%s %-9s %-43s [%s]\n' "$COLOR_LINE" "$COLOR_RESET" "Full" "Malware, ads and tracking" "$(dns_profile_is_available full && printf available || printf 'not available')"
-        printf '%s5.%s %-9s %-43s [%s]\n' "$COLOR_LINE" "$COLOR_RESET" "Maximum" "Broad protection and DNS bypass" "$(dns_profile_is_available maximum && printf available || printf 'not available')"
-        printf '%s6.%s %-9s %-43s [%s]\n' "$COLOR_LINE" "$COLOR_RESET" "Custom" "Choose protection categories" "$(dns_profile_is_available custom && printf available || printf 'not available')"
+        ui_print_table "  " "  " 0 \
+            $'1.\tDisabled\tNo blocking\t[available]' \
+            $'2.\tMinimal\tMalware protection\t['"$(dns_profile_is_available minimal && printf available || printf 'not available')"$']' \
+            $'3.\tOptimal\tMalware, phishing and scams\t['"$(dns_profile_is_available optimal && printf available || printf 'not available')"$']' \
+            $'4.\tFull\tMalware, ads and tracking\t['"$(dns_profile_is_available full && printf available || printf 'not available')"$']' \
+            $'5.\tMaximum\tBroad protection and DNS bypass\t['"$(dns_profile_is_available maximum && printf available || printf 'not available')"$']' \
+            $'6.\tCustom\tChoose protection categories\t['"$(dns_profile_is_available custom && printf available || printf 'not available')"$']'
         echo
         if [[ "$mode" == "initial" ]]; then
             printf '%s\n' "Not sure what to choose? Press Enter to keep it disabled."
@@ -484,9 +497,9 @@ manage_dns_protection() {
         return 1
     fi
     host="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["host"])' "$node" <"$before")"
-    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_user"])' "$node" <"$before")"
-    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_port"])' "$node" <"$before")"
-    private_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_private_key"], end="")' "$node" <"$before")"
+    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["user"])' "$node" <"$before")"
+    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["port"])' "$node" <"$before")"
+    private_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["private_key"], end="")' "$node" <"$before")"
     known_hosts_file="$(mktemp /tmp/xray-known-hosts.XXXXXX)"
     if ! write_node_known_hosts "$before" "$node" "$known_hosts_file"; then
         rm -f "$before" "$known_hosts_file"
@@ -495,8 +508,8 @@ manage_dns_protection() {
         wait_action_return
         return 1
     fi
-    current_profile="$(python3 -c 'import json,sys; node=json.load(sys.stdin)["nodes"][sys.argv[1]]; print(node.get("xray", {}).get("dns_filter_profile", "disabled"), end="")' "$node" <"$before")"
-    current_lists="$(python3 -c 'import json,sys; node=json.load(sys.stdin)["nodes"][sys.argv[1]]; print(",".join(node.get("xray", {}).get("dns_filter_lists", [])), end="")' "$node" <"$before")"
+    current_profile="$(python3 -c 'import json,sys; node=json.load(sys.stdin)["nodes"][sys.argv[1]]; print(node["access"]["xray_reality"].get("dns_filter_profile", "disabled"), end="")' "$node" <"$before")"
+    current_lists="$(python3 -c 'import json,sys; node=json.load(sys.stdin)["nodes"][sys.argv[1]]; print(",".join(node["access"]["xray_reality"].get("dns_filter_lists", [])), end="")' "$node" <"$before")"
     if [[ -z "$private_key" ]]; then
         rm -f "$before" "$known_hosts_file"
         clear_screen
@@ -539,7 +552,7 @@ manage_dns_protection() {
     else
         printf '%s\n' "Enabling ${selected_profile^} DNS protection."
     fi
-    if ! run_node_playbook "$node" site.yml "$after" "Updating DNS protection" dns; then
+    if ! run_node_playbook "$node" deploy_standalone.yml "$after" "Updating DNS protection" dns; then
         rm -f "$before" "$after" "$known_hosts_file"
         show_result_screen "DNS protection change failed. The existing Vault was not changed."
         return 1
@@ -636,9 +649,9 @@ manage_cascade_dns_protection() {
     fi
     egress_node="$(cascade_node "$deployment_id" egress)"
     host="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["host"])' "$egress_node" <"$before")"
-    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_user"])' "$egress_node" <"$before")"
-    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_port"])' "$egress_node" <"$before")"
-    private_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]].get("management_private_key", ""), end="")' "$egress_node" <"$before")"
+    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["user"])' "$egress_node" <"$before")"
+    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["port"])' "$egress_node" <"$before")"
+    private_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"].get("private_key", ""), end="")' "$egress_node" <"$before")"
     known_hosts_file="$(mktemp /tmp/cascade-egress-known-hosts.XXXXXX)"
     if [[ -z "$private_key" ]] || ! write_node_known_hosts "$before" "$egress_node" "$known_hosts_file"; then
         rm -f "$before" "$known_hosts_file"
@@ -656,7 +669,7 @@ import json
 import sys
 
 state = json.load(open(sys.argv[2], encoding="utf-8"))
-egress = state["deployments"][sys.argv[1]].get("settings", {}).get("egress", {})
+egress = state["deployments"][sys.argv[1]].get("settings", {}).get("topology_cascade_egress", {})
 names = [item.get("name") for item in egress.get("rpz_sources", []) if isinstance(item, dict)]
 profile = egress.get("rpz_profile")
 profiles = {
@@ -680,7 +693,7 @@ import json
 import sys
 
 state = json.load(open(sys.argv[2], encoding="utf-8"))
-sources = state["deployments"][sys.argv[1]].get("settings", {}).get("egress", {}).get("rpz_sources", [])
+sources = state["deployments"][sys.argv[1]].get("settings", {}).get("topology_cascade_egress", {}).get("rpz_sources", [])
 print(",".join(source.get("name", "") for source in sources if isinstance(source, dict) and source.get("name")), end="")
 PY
 )"
@@ -743,7 +756,7 @@ manage_local_region_policy() {
         rm -f "$before"
         return 1
     fi
-    current_countries="$(python3 -c 'import json,sys; node=json.load(sys.stdin)["nodes"][sys.argv[1]]; print(",".join(node.get("xray", {}).get("local_region_countries", [])), end="")' "$node" <"$before")"
+    current_countries="$(python3 -c 'import json,sys; node=json.load(sys.stdin)["nodes"][sys.argv[1]]; print(",".join(node["access"]["xray_reality"].get("local_region_countries", [])), end="")' "$node" <"$before")"
     LOCAL_REGION_COUNTRIES="$current_countries"
     while true; do
         clear_screen
@@ -789,7 +802,7 @@ manage_local_region_policy() {
         else
             printf '%s\n' "Disabling country blocking."
         fi
-        if ! run_node_playbook "$node" site.yml "$after" "Updating country blocking" countries; then
+        if ! run_node_playbook "$node" deploy_standalone.yml "$after" "Updating country blocking" countries; then
             rm -f "$before" "$after"
             unset LOCAL_REGION_COUNTRIES
             show_result_screen "Country blocking change failed. The existing Vault was not changed."
@@ -827,7 +840,7 @@ import json
 import sys
 
 state = json.load(open(sys.argv[2], encoding="utf-8"))
-countries = state["deployments"][sys.argv[1]].get("settings", {}).get("ingress", {}).get("local_region_countries", [])
+countries = state["deployments"][sys.argv[1]].get("settings", {}).get("topology_cascade_ingress", {}).get("local_region_countries", [])
 print(",".join(countries), end="")
 PY
 )"

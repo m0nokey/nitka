@@ -30,7 +30,7 @@ run_tui $'x\n'
 [[ "$TEST_OUTPUT" != *"3. Cascade VPN"* ]]
 
 run_tui $'2\nb\nx\n'
-[[ "$TEST_OUTPUT" == *"1. Single-node Xray"* ]]
+[[ "$TEST_OUTPUT" == *"1. Standalone VPN"* ]]
 [[ "$TEST_OUTPUT" == *"2. Cascade VPN"* ]]
 
 run_tui $'3\nb\nx\n'
@@ -44,3 +44,7 @@ tar -C "$TEST_HOME" -czf \
 run_tui $'3\n2\nb\nx\n'
 [[ "$TEST_OUTPUT" == *"User backup | 2026-07-29 05:07:36 UTC"* ]]
 [[ "$TEST_OUTPUT" == *"Path: $TEST_STATE_HOME/nitka/backups/user/vault-20260729T050736Z.tar.gz"* ]]
+
+grep -Fq 'menu_option 1 "Resume previous installation"' "$ROOT_DIR/controller/entrypoint.sh"
+grep -Fq 'menu_option 2 "Abort and clean the VPS"' "$ROOT_DIR/controller/entrypoint.sh"
+grep -Fq 'menu_option 3 "Start over after manual cleanup"' "$ROOT_DIR/controller/entrypoint.sh"

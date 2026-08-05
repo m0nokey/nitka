@@ -10,16 +10,23 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nitka"
 # Match the container process to the host user so the 0700 Vault directory
 # remains writable without granting the controller root privileges.
 export NITKA_UID="${NITKA_UID:-$(id -u)}"
+for argument in "$@"; do
+    if [[ "$argument" == '--debug' ]]; then
+        export NITKA_DEBUG=1
+    fi
+done
 
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 
 file_sha256() {
+    local digest
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" | awk '{print $1}'
+        read -r digest _ < <(sha256sum "$1")
     else
-        shasum -a 256 "$1" | awk '{print $1}'
+        read -r digest _ < <(shasum -a 256 "$1")
     fi
+    printf '%s' "$digest"
 }
 
 docker_hub_manifest_digest() {
@@ -36,12 +43,13 @@ docker_hub_manifest_digest() {
         -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
         "https://registry-1.docker.io/v2/${repo}/manifests/${tag}" \
         | tr -d '\r' \
-        | awk 'tolower($1)=="docker-content-digest:" {print $2; exit}' || true
+        | sed -nE 's/^[Dd]ocker-[Cc]ontent-[Dd]igest:[[:space:]]*([^[:space:]]+).*/\1/p' \
+        | head -n 1 || true
 }
 
 resolve_digest() {
     local digest
-    digest="$(docker buildx imagetools inspect "$BASE_IMAGE" 2>/dev/null | awk '/^Digest:/ {print $2; exit}' || true)"
+    digest="$(docker buildx imagetools inspect "$BASE_IMAGE" 2>/dev/null | sed -nE 's/^Digest:[[:space:]]+([^[:space:]]+).*/\1/p' | head -n 1 || true)"
     if [[ -z "$digest" ]]; then
         digest="$(docker manifest inspect "$BASE_IMAGE" 2>/dev/null | sed -nE 's/.*"digest"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n1 || true)"
     fi

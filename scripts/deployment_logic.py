@@ -12,16 +12,20 @@ from copy import deepcopy
 try:
     from .state_logic import generated_port
     from .transport_registry import (
+        PLANE_BACKHAUL,
         TRANSPORT_SSH_TUN,
         TRANSPORT_XRAY_REALITY,
+        get_transport_adapter,
         validate_deployment_transports,
         validate_transport_plan,
     )
 except ImportError:  # pragma: no cover - direct execution through state_cli.py
     from state_logic import generated_port
     from transport_registry import (
+        PLANE_BACKHAUL,
         TRANSPORT_SSH_TUN,
         TRANSPORT_XRAY_REALITY,
+        get_transport_adapter,
         validate_deployment_transports,
         validate_transport_plan,
     )
@@ -30,12 +34,9 @@ SCHEMA_VERSION = 1
 TOPOLOGY_CASCADE = "cascade"
 ROLE_INGRESS = "ingress"
 ROLE_EGRESS = "egress"
-BACKEND_XRAY = "xray"
-TRANSPORT_EXISTING_XRAY = "existing-xray"
-
 CASCADE_DEFAULT_SETTINGS = {
     "remote_root": "/opt/nitka/cascade",
-    "ssh_tun": {
+    "backhaul_ssh_tun": {
         "username": "vpnuser",
         "port": None,
         "internal_port": 22,
@@ -49,14 +50,14 @@ CASCADE_DEFAULT_SETTINGS = {
         "vpn_gateway_cidr": "10.11.12.1/30",
         "vpn_client_cidr": "10.11.12.2/30",
     },
-    "ingress": {
+    "topology_cascade_ingress": {
         "clash_port": 1080,
         "xray_port_min": 20000,
         "xray_port_max": 60000,
         "obfs_path": "/",
         "local_region_countries": [],
     },
-    "egress": {
+    "topology_cascade_egress": {
         "forward_servers": [
             {"address": "1.1.1.1", "tls_name": "cloudflare-dns.com"},
             {"address": "1.0.0.1", "tls_name": "cloudflare-dns.com"},
@@ -163,25 +164,6 @@ def _deep_merge(base, override):
     return result
 
 
-def _first_nested_value(value, names):
-    """Find a non-empty legacy field without exposing its value."""
-    if isinstance(value, dict):
-        for name in names:
-            candidate = value.get(name)
-            if candidate not in (None, ""):
-                return candidate
-        for child in value.values():
-            candidate = _first_nested_value(child, names)
-            if candidate not in (None, ""):
-                return candidate
-    elif isinstance(value, list):
-        for child in value:
-            candidate = _first_nested_value(child, names)
-            if candidate not in (None, ""):
-                return candidate
-    return None
-
-
 def _key_payload(value):
     """Normalize a migrated plaintext or base64-encoded key payload."""
     if not isinstance(value, str):
@@ -198,22 +180,6 @@ def _key_payload(value):
     return decoded.strip() if "PRIVATE KEY" in decoded or decoded.startswith("ssh-") else value
 
 
-def _decoded_project_env(state):
-    payload = state.get("project_env_b64") if isinstance(state, dict) else None
-    if not isinstance(payload, str) or not payload:
-        return {}
-    try:
-        text = base64.b64decode(payload, validate=True).decode()
-    except (ValueError, UnicodeDecodeError):
-        return {}
-    values = {}
-    for line in text.splitlines():
-        key, separator, value = line.partition("=")
-        if separator and key.strip():
-            values[key.strip()] = value.strip()
-    return values
-
-
 def _is_dedicated_transport_port(value):
     try:
         port = int(value)
@@ -222,94 +188,22 @@ def _is_dedicated_transport_port(value):
     return 1025 <= port <= 65535 and port != 22
 
 
-def _legacy_ssh_tun_values(state, deployment, egress, ssh_tun):
-    """Read the old Nitka transport fields while keeping them out of UI output."""
-    project_env = _decoded_project_env(state)
-    sources = [ssh_tun, deployment, egress, state, project_env]
-    port = _first_nested_value(
-        sources,
-        (
-            "ssh_tun_port",
-            "ssh_tun_ssh_port",
-            "tun_port",
-            "ssh_tun_external_port",
-            "transport_port",
-        ),
-    )
-    if port in (None, "") or not _is_dedicated_transport_port(port):
-        fallback_sources = [project_env, state, egress, deployment, ssh_tun]
-        for source in fallback_sources:
-            candidate = _first_nested_value(source, (
-                "ssh_tun_port",
-                "ssh_tun_ssh_port",
-                "tun_port",
-                "ssh_tun_external_port",
-                "transport_port",
-            ))
-            if _is_dedicated_transport_port(candidate):
-                port = candidate
-                break
-        if port in (None, "") or not _is_dedicated_transport_port(port):
-            port = None
-        for source in sources:
-            if not isinstance(source, dict):
-                continue
-            mapping = source.get("port_mapping", {})
-            ports = mapping.get("ports", {}) if isinstance(mapping, dict) else {}
-            for name in ("ssh_tun", "ssh_tun_server", "tun"):
-                entry = ports.get(name, {}) if isinstance(ports, dict) else {}
-                if (
-                    isinstance(entry, dict)
-                    and _is_dedicated_transport_port(entry.get("external"))
-                ):
-                    port = entry["external"]
-                    break
-            if port not in (None, ""):
-                break
-    values = {
-        "port": port,
-        "username": _first_nested_value(
-            sources,
-            ("ssh_tun_username", "ssh_tun_ssh_username", "tun_username"),
-        ),
-        "auth_private_key": _first_nested_value(
-            sources,
-            ("ssh_tun_private_key", "ssh_tun_private_key_b64"),
-        ),
-        "auth_public_key": _first_nested_value(
-            sources,
-            ("ssh_tun_public_key",),
-        ),
-        "host_private_key": _first_nested_value(
-            sources,
-            ("ssh_tun_host_private_key", "ssh_tun_host_private_key_b64"),
-        ),
-        "host_public_key": _first_nested_value(
-            sources,
-            ("ssh_tun_host_public_key",),
-        ),
+def _backhaul_ssh_tun_runtime(backhaul_ssh_tun_settings):
+    """Read the canonical SSH TUN key material captured for this deployment."""
+    return {
+        "auth_private_key": _key_payload(backhaul_ssh_tun_settings.get("auth_private_key")),
+        "auth_public_key": _key_payload(backhaul_ssh_tun_settings.get("auth_public_key")),
+        "host_private_key": _key_payload(backhaul_ssh_tun_settings.get("host_private_key")),
+        "host_public_key": _key_payload(backhaul_ssh_tun_settings.get("host_public_key")),
     }
-    if values["port"] not in (None, ""):
-        ssh_tun["port"] = int(values["port"])
-    if values["username"] not in (None, ""):
-        ssh_tun["username"] = str(values["username"])
-    for key in ("auth_private_key", "auth_public_key", "host_private_key", "host_public_key"):
-        values[key] = _key_payload(values[key])
-    for label, private_name, public_name in (
-        ("SSH TUN authentication", "auth_private_key", "auth_public_key"),
-        ("SSH TUN host", "host_private_key", "host_public_key"),
-    ):
-        if bool(values[private_name]) != bool(values[public_name]):
-            raise ValueError(f"incomplete migrated {label} key pair")
-    return values
 
 
 def _cascade_reserved_ports(egress):
     reserved = set()
     for value in (
-        egress.get("management_port"),
-        egress.get("bootstrap_ssh_port"),
-        egress.get("ssh_port"),
+        egress.get("management", {}).get("port"),
+        egress.get("bootstrap", {}).get("port"),
+        egress.get("management", {}).get("sshd_port"),
     ):
         try:
             reserved.add(int(value))
@@ -333,11 +227,10 @@ def normalize_cascade_transport(state, deployment_id):
     egress_node = deployment["roles"][ROLE_EGRESS]["node"]
     egress = result["nodes"][egress_node]
     settings = _deep_merge(CASCADE_DEFAULT_SETTINGS, deployment.get("settings", {}))
-    ssh_tun = settings["ssh_tun"]
-    _legacy_ssh_tun_values(result, deployment, egress, ssh_tun)
+    backhaul_ssh_tun_settings = settings["backhaul_ssh_tun"]
     reserved = _cascade_reserved_ports(egress)
     try:
-        port = int(ssh_tun.get("port"))
+        port = int(backhaul_ssh_tun_settings.get("port"))
     except (TypeError, ValueError):
         port = None
     if (
@@ -345,18 +238,20 @@ def normalize_cascade_transport(state, deployment_id):
         or not _is_dedicated_transport_port(port)
         or port in reserved
     ):
-        ssh_tun["port"] = generated_port(reserved)
+        backhaul_ssh_tun_settings["port"] = generated_port(reserved)
     else:
-        ssh_tun["port"] = port
+        backhaul_ssh_tun_settings["port"] = port
     deployment["settings"] = settings
     return result
 
 
 def _preserved_management_users(node):
+    management = node.get("management", {})
+    bootstrap = node.get("bootstrap", {})
     users = [
-        node.get("management_user"),
-        node.get("bootstrap_user"),
-        *(node.get("preserved_management_users") or []),
+        management.get("user"),
+        bootstrap.get("user"),
+        *(management.get("preserved_users") or []),
     ]
     return list(dict.fromkeys(user for user in users if user and user != "root"))
 
@@ -378,25 +273,17 @@ def cascade_deployment(deployment_id, ingress_node, egress_node):
         "id": deployment_id,
         "topology": TOPOLOGY_CASCADE,
         "roles": {
-            ROLE_INGRESS: {
-                "node": ingress_node,
-                "backend": BACKEND_XRAY,
-                "transport": TRANSPORT_EXISTING_XRAY,
-            },
-            ROLE_EGRESS: {
-                "node": egress_node,
-                "backend": BACKEND_XRAY,
-                "transport": TRANSPORT_EXISTING_XRAY,
-            },
+            ROLE_INGRESS: {"node": ingress_node},
+            ROLE_EGRESS: {"node": egress_node},
         },
         "transports": {
             "access": {"transport": TRANSPORT_XRAY_REALITY},
             "backhaul": {"transport": TRANSPORT_SSH_TUN},
         },
         "services": {
-            "ssh_tun": {"enabled": True},
-            "dns": {"backend": "unbound"},
-            "health": {"enabled": True},
+            "backhaul_ssh_tun": {"enabled": True},
+            "dns_unbound": {"enabled": True},
+            "healthcheck": {"enabled": True},
         },
         "policy": {
             "routing": "vault",
@@ -404,7 +291,7 @@ def cascade_deployment(deployment_id, ingress_node, egress_node):
         },
         "settings": _deep_merge(
             CASCADE_DEFAULT_SETTINGS,
-            {"ssh_tun": {"port": generated_port(set())}},
+            {"backhaul_ssh_tun": {"port": generated_port(set())}},
         ),
     }
 
@@ -429,6 +316,93 @@ def attach_cascade(state, deployment_id, ingress_node, egress_node):
     return result
 
 
+def replace_cascade_node(state, deployment_id, role, new_node):
+    """Switch one Cascade role to a prepared node without changing transports."""
+    if role not in (ROLE_INGRESS, ROLE_EGRESS):
+        raise ValueError(f"unsupported Cascade role: {role}")
+
+    result = _state_copy(state)
+    deployments = result.get("deployments", {})
+    deployment = deployments.get(deployment_id)
+    if not isinstance(deployment, dict):
+        raise ValueError(f"deployment not found: {deployment_id}")
+    nodes = result.get("nodes", {})
+    if new_node not in nodes:
+        raise ValueError(f"replacement node not found: {new_node}")
+
+    selected = deployment.get("roles", {}).get(role)
+    if not isinstance(selected, dict):
+        raise ValueError(f"missing deployment role: {deployment_id}/{role}")
+    old_node = selected.get("node")
+    if old_node == new_node:
+        raise ValueError("replacement node must differ from the current node")
+    if old_node not in nodes:
+        raise ValueError(f"current node not found: {deployment_id}/{role}")
+
+    selected["node"] = new_node
+    if role == ROLE_INGRESS:
+        # Keep client links, REALITY keys, and routing policy unchanged when
+        # an ingress replacement is introduced by a future UI flow.
+        nodes[new_node].setdefault("access", {})["xray_reality"] = deepcopy(
+            nodes[old_node].get("access", {}).get("xray_reality", {})
+        )
+    return result
+
+
+def deployment_transport_summary(state, deployment_id):
+    """Describe the access and backhaul adapters selected by a deployment.
+
+    This is intentionally metadata-only. It lets the UI explain a replacement
+    or a future transport migration without inspecting transport credentials.
+    Deployment validation remains strict and refuses adapters that have no
+    Ansible implementation yet.
+    """
+    deployment = state.get("deployments", {}).get(deployment_id)
+    if not isinstance(deployment, dict):
+        raise ValueError(f"deployment not found: {deployment_id}")
+
+    selected = deployment.get("transports", {})
+    if not isinstance(selected, dict):
+        raise TypeError("deployment transports must be an object")
+    access = selected.get("access", {}).get("transport", TRANSPORT_XRAY_REALITY)
+    backhaul = selected.get("backhaul", {}).get("transport", TRANSPORT_SSH_TUN)
+    access_adapter = get_transport_adapter(access, "access")
+    backhaul_adapter = get_transport_adapter(backhaul, PLANE_BACKHAUL)
+    return {
+        "topology": deployment.get("topology", TOPOLOGY_CASCADE),
+        "access": {
+            "transport": access_adapter.name,
+            "implemented": access_adapter.implemented,
+            "implementation_role": access_adapter.implementation_role,
+        },
+        "backhaul": {
+            "transport": backhaul_adapter.name,
+            "implemented": backhaul_adapter.implemented,
+            "implementation_role": backhaul_adapter.implementation_role,
+        },
+    }
+
+
+def set_cascade_transports(state, deployment_id, access_transport, backhaul_transport):
+    """Return state with a validated Cascade transport plan.
+
+    Callers should deploy the returned state and persist it only after both
+    endpoints pass healthchecks. This keeps transport migration transactional
+    in the same way as node replacement.
+    """
+    result = _state_copy(state)
+    deployment = result.get("deployments", {}).get(deployment_id)
+    if not isinstance(deployment, dict):
+        raise ValueError(f"deployment not found: {deployment_id}")
+    plan = validate_transport_plan(
+        TOPOLOGY_CASCADE, access_transport, backhaul_transport
+    )
+    selected = deployment.setdefault("transports", {})
+    selected["access"] = {"transport": plan["bindings"][0]["transport"]}
+    selected["backhaul"] = {"transport": plan["bindings"][1]["transport"]}
+    return result
+
+
 def validate_deployments(state):
     """Validate deployment references without inspecting secret values."""
     if not isinstance(state, dict) or not isinstance(state.get("nodes"), dict):
@@ -446,18 +420,7 @@ def validate_deployments(state):
         roles = deployment.get("roles")
         if not isinstance(roles, dict):
             raise TypeError(f"deployment roles must be an object: {deployment_id}")
-        if "transports" in deployment:
-            validate_deployment_transports(deployment)
-        else:
-            # Read old state written before the modular transport contract.
-            # It remains valid while the new block is introduced gradually.
-            validate_transport_plan(
-                deployment.get("topology"),
-                TRANSPORT_XRAY_REALITY,
-                TRANSPORT_SSH_TUN
-                if deployment.get("services", {}).get("ssh_tun", {}).get("enabled")
-                else None,
-            )
+        validate_deployment_transports(deployment)
         for role in (ROLE_INGRESS, ROLE_EGRESS):
             selected = roles.get(role)
             if not isinstance(selected, dict):
@@ -465,10 +428,6 @@ def validate_deployments(state):
             node = selected.get("node")
             if node not in state["nodes"]:
                 raise ValueError(f"deployment node not found: {deployment_id}/{role}")
-            if selected.get("backend") != BACKEND_XRAY:
-                raise ValueError(f"unsupported backend: {deployment_id}/{role}")
-            if selected.get("transport") != TRANSPORT_EXISTING_XRAY:
-                raise ValueError(f"unsupported transport: {deployment_id}/{role}")
 
         if roles[ROLE_INGRESS]["node"] == roles[ROLE_EGRESS]["node"]:
             raise ValueError(f"cascade roles reference the same node: {deployment_id}")
@@ -491,9 +450,9 @@ def cascade_ansible_vars(state, deployment_id, local_root):
     roles = deployment["roles"]
     ingress = state["nodes"][roles[ROLE_INGRESS]["node"]]
     egress = state["nodes"][roles[ROLE_EGRESS]["node"]]
-    ingress_xray = ingress.get("xray")
+    ingress_xray = ingress.get("access", {}).get("xray_reality")
     if not isinstance(ingress_xray, dict):
-        raise TypeError("ingress node must contain an xray object")
+        raise TypeError("ingress node must contain access.xray_reality")
     access_keys = ingress_xray.get("access_keys")
     if not isinstance(access_keys, list) or not access_keys:
         raise ValueError("ingress node must contain at least one Xray access key")
@@ -519,25 +478,25 @@ def cascade_ansible_vars(state, deployment_id, local_root):
         raise ValueError(f"ingress Xray state is missing: {', '.join(missing)}")
 
     settings = _deep_merge(CASCADE_DEFAULT_SETTINGS, deployment.get("settings", {}))
-    ssh_tun = settings["ssh_tun"]
-    transport = _legacy_ssh_tun_values(state, deployment, egress, ssh_tun)
+    backhaul_ssh_tun_settings = settings["backhaul_ssh_tun"]
+    backhaul_ssh_tun_runtime = _backhaul_ssh_tun_runtime(backhaul_ssh_tun_settings)
     try:
-        ssh_tun["port"] = int(ssh_tun["port"])
+        backhaul_ssh_tun_settings["port"] = int(backhaul_ssh_tun_settings["port"])
     except (TypeError, ValueError) as exc:
         raise ValueError("cascade SSH TUN requires a valid dedicated transport port") from exc
-    if not 1025 <= ssh_tun["port"] <= 65535 or ssh_tun["port"] == 22:
+    if not 1025 <= backhaul_ssh_tun_settings["port"] <= 65535 or backhaul_ssh_tun_settings["port"] == 22:
         raise ValueError(
             "cascade SSH TUN requires a dedicated external transport port; "
             "management/bootstrap port 22 cannot be used"
         )
     reserved_ports = _cascade_reserved_ports(egress)
-    if ssh_tun["port"] in reserved_ports:
+    if backhaul_ssh_tun_settings["port"] in reserved_ports:
         raise ValueError(
             "cascade SSH TUN transport port must differ from all egress "
             "bootstrap/management SSH ports"
         )
-    ingress_settings = settings["ingress"]
-    egress_settings = settings["egress"]
+    ingress_settings = settings["topology_cascade_ingress"]
+    egress_settings = settings["topology_cascade_egress"]
     rpz_sources = list(egress_settings["rpz_sources"])
     rpz_profile = egress_settings.get("rpz_profile")
     local_rpz_name = "cascade-local-ads-tracking"
@@ -590,80 +549,101 @@ def cascade_ansible_vars(state, deployment_id, local_root):
         and binding["plane"] == "backhaul"
     )
 
-    vars_ = {
-        "cascade_ingress_access_transport": access_transport,
-        "cascade_ingress_backhaul_transport": backhaul_transport,
-        "cascade_egress_backhaul_transport": backhaul_transport,
-        "cascade_ingress_backhaul_service_name": "ssh_tun_client",
-        "cascade_ingress_backhaul_container_name": "cascade-ssh-tun-client",
-        "cascade_egress_backhaul_service_name": "ssh_tun_server",
-        "cascade_egress_backhaul_container_name": "cascade-ssh-tun-server",
+    ansible_variables = {
+        "topology_cascade_transport_bindings": transport_plan["bindings"],
+        "topology_cascade_ingress_access_transport": access_transport,
+        "topology_cascade_ingress_backhaul_transport": backhaul_transport,
+        "topology_cascade_egress_backhaul_transport": backhaul_transport,
         "system_base_deploy_user": "deploy",
-        "cascade_ingress_harden_ssh_initial_user": ingress.get(
-            "management_user", "deploy"
+        "topology_cascade_ingress_management_sshd_port": ingress.get("management", {}).get("sshd_port", 22),
+        "topology_cascade_egress_management_sshd_port": egress.get("management", {}).get("sshd_port", 22),
+        "topology_cascade_ingress_management_port": ingress.get("management", {}).get("port", 22),
+        "topology_cascade_egress_management_port": egress.get("management", {}).get("port", 22),
+        "topology_cascade_ingress_harden_ssh_initial_user": ingress.get("management", {}).get(
+            "user", "deploy"
         ),
-        "cascade_egress_harden_ssh_initial_user": egress.get(
-            "management_user", "deploy"
+        "topology_cascade_egress_harden_ssh_initial_user": egress.get("management", {}).get(
+            "user", "deploy"
         ),
-        "cascade_ingress_harden_ssh_preserve_users": _preserved_management_users(ingress),
-        "cascade_egress_harden_ssh_preserve_users": _preserved_management_users(egress),
-        "cascade_ingress_deploy_authorized_key": ingress.get("management_authorized_key", ""),
-        "cascade_egress_deploy_authorized_key": egress.get("management_authorized_key", ""),
-        "cascade_ingress_local_dir": f"{deployment_root}/ingress",
-        "cascade_ingress_state_dir": f"{deployment_root}/ingress/state",
-        "cascade_ingress_remote_dir": f"{remote_root}/ingress",
-        "cascade_egress_remote_dir": f"{remote_root}/egress",
-        "cascade_ssh_tun_ssh_key_dir": f"{deployment_root}/ssh",
-        "cascade_ssh_tun_ssh_username": ssh_tun["username"],
-        "cascade_ssh_tun_container_port": ssh_tun["internal_port"],
-        "cascade_ssh_tun_public_host": egress["host"],
-        "cascade_ssh_tun_network_container_subnet_cidr_ipv4": ssh_tun["container_subnet"],
-        "cascade_ssh_tun_network_vpn_subnet_cidr_ipv4": ssh_tun["vpn_subnet"],
-        "cascade_ssh_tun_network_interface": ssh_tun["interface"],
-        "cascade_ssh_tun_device_number": ssh_tun["device_number"],
-        "cascade_ssh_tun_network_container_gateway_ipv4": ssh_tun["container_gateway"],
-        "cascade_ssh_tun_network_container_vpn_ipv4": ssh_tun["container_vpn"],
-        "cascade_ssh_tun_network_vpn_gateway_ipv4": ssh_tun["vpn_gateway"],
-        "cascade_ssh_tun_network_vpn_gateway_cidr_ipv4": ssh_tun["vpn_gateway_cidr"],
-        "cascade_ssh_tun_network_vpn_client_cidr_ipv4": ssh_tun["vpn_client_cidr"],
-        "cascade_ingress_xray_public_host": ingress["host"],
-        "cascade_ingress_xray_xhttp_port": ingress_xray["xhttp_port"],
-        "cascade_ingress_xray_reality_port": ingress_xray["vision_port"],
-        "cascade_ingress_xray_access_keys": access_keys,
-        "cascade_ingress_xray_xhttp_uuid": access_key["xhttp_uuid"],
-        "cascade_ingress_xray_reality_uuid": access_key["vision_uuid"],
-        "cascade_ingress_xray_reality_private_key": ingress_xray["reality_private_key"],
-        "cascade_ingress_xray_reality_public_key": ingress_xray["reality_public_key"],
-        "cascade_ingress_xray_reality_short_id": ingress_xray["reality_short_id"],
-        "cascade_ingress_xray_obfs_host": ingress_xray["server_name"],
-        "cascade_ingress_xray_obfs_path": ingress_settings["obfs_path"],
-        "cascade_ingress_xray_xhttp_port_min": ingress_settings["xray_port_min"],
-        "cascade_ingress_xray_xhttp_port_max": ingress_settings["xray_port_max"],
-        "cascade_ingress_xray_reality_port_min": ingress_settings["xray_port_min"],
-        "cascade_ingress_xray_reality_port_max": ingress_settings["xray_port_max"],
-        "cascade_ingress_xray_xhttp_remarks": f"{deployment_id}-xhttp",
-        "cascade_ingress_xray_reality_remarks": f"{deployment_id}-vision",
-        "cascade_ingress_xray_share_link_path": f"{deployment_root}/share-links.txt",
-        "cascade_ingress_clash_port": ingress_settings["clash_port"],
-        "cascade_ingress_clash_tcp_concurrent": ingress_xray.get(
+        "topology_cascade_ingress_harden_ssh_preserve_users": _preserved_management_users(ingress),
+        "topology_cascade_egress_harden_ssh_preserve_users": _preserved_management_users(egress),
+        "topology_cascade_ingress_deploy_authorized_key": ingress.get("management", {}).get("authorized_key", ""),
+        "topology_cascade_egress_deploy_authorized_key": egress.get("management", {}).get("authorized_key", ""),
+        "topology_cascade_ingress_local_dir": f"{deployment_root}/ingress",
+        "topology_cascade_ingress_state_dir": f"{deployment_root}/ingress/state",
+        "topology_cascade_ingress_remote_dir": f"{remote_root}/ingress",
+        "topology_cascade_egress_remote_dir": f"{remote_root}/egress",
+        "backhaul_ssh_tun_ssh_key_dir": f"{deployment_root}/ssh",
+        "backhaul_ssh_tun_ssh_username": backhaul_ssh_tun_settings["username"],
+        "backhaul_ssh_tun_container_port": backhaul_ssh_tun_settings["internal_port"],
+        "backhaul_ssh_tun_public_host": egress["host"],
+        "backhaul_ssh_tun_network_container_subnet_cidr_ipv4": backhaul_ssh_tun_settings["container_subnet"],
+        "backhaul_ssh_tun_network_vpn_subnet_cidr_ipv4": backhaul_ssh_tun_settings["vpn_subnet"],
+        "backhaul_ssh_tun_network_interface": backhaul_ssh_tun_settings["interface"],
+        "backhaul_ssh_tun_device_number": backhaul_ssh_tun_settings["device_number"],
+        "backhaul_ssh_tun_network_container_gateway_ipv4": backhaul_ssh_tun_settings["container_gateway"],
+        "backhaul_ssh_tun_network_container_vpn_ipv4": backhaul_ssh_tun_settings["container_vpn"],
+        "backhaul_ssh_tun_network_vpn_gateway_ipv4": backhaul_ssh_tun_settings["vpn_gateway"],
+        "backhaul_ssh_tun_network_vpn_gateway_cidr_ipv4": backhaul_ssh_tun_settings["vpn_gateway_cidr"],
+        "backhaul_ssh_tun_network_vpn_client_cidr_ipv4": backhaul_ssh_tun_settings["vpn_client_cidr"],
+        "access_xray_public_host": ingress["host"],
+        "access_xray_xhttp_port": ingress_xray["xhttp_port"],
+        "access_xray_reality_port": ingress_xray["vision_port"],
+        "access_xray_access_keys": access_keys,
+        "access_xray_xhttp_uuid": access_key["xhttp_uuid"],
+        "access_xray_reality_uuid": access_key["vision_uuid"],
+        "access_xray_reality_private_key": ingress_xray["reality_private_key"],
+        "access_xray_reality_public_key": ingress_xray["reality_public_key"],
+        "access_xray_reality_short_id": ingress_xray["reality_short_id"],
+        "access_xray_obfs_host": ingress_xray["server_name"],
+        "access_xray_obfs_path": ingress_settings["obfs_path"],
+        "access_xray_xhttp_port_min": ingress_settings["xray_port_min"],
+        "access_xray_xhttp_port_max": ingress_settings["xray_port_max"],
+        "access_xray_reality_port_min": ingress_settings["xray_port_min"],
+        "access_xray_reality_port_max": ingress_settings["xray_port_max"],
+        "access_xray_xhttp_remarks": f"{deployment_id}-xhttp",
+        "access_xray_reality_remarks": f"{deployment_id}-vision",
+        "access_xray_share_link_path": f"{deployment_root}/share-links.txt",
+        "topology_cascade_ingress_clash_port": ingress_settings["clash_port"],
+        "topology_cascade_ingress_clash_tcp_concurrent": ingress_xray.get(
             "clash_tcp_concurrent", True
         ),
         # Resolve all Cascade DNS through the egress Unbound instance.  This
         # prevents direct resolvers and public fallbacks from bypassing RPZ.
-        "cascade_ingress_xray_dns_egress_only": True,
-        "cascade_ingress_xray_local_region_countries": local_region_countries,
-        "cascade_egress_unbound_forward_servers": egress_settings["forward_servers"],
-        "cascade_egress_unbound_rpz_sources": rpz_sources,
+        "access_xray_dns_egress_only": True,
+        "access_xray_local_region_countries": local_region_countries,
+        "topology_cascade_egress_unbound_forward_servers": egress_settings["forward_servers"],
+        "topology_cascade_egress_unbound_rpz_sources": rpz_sources,
     }
-    vars_["cascade_ssh_tun_ssh_port"] = ssh_tun["port"]
+    backhaul_adapter = get_transport_adapter(backhaul_transport, PLANE_BACKHAUL)
+    if not all(
+        (
+            backhaul_adapter.client_service_name,
+            backhaul_adapter.server_service_name,
+            backhaul_adapter.client_container_name,
+            backhaul_adapter.server_container_name,
+        )
+    ):
+        raise ValueError(
+            f"backhaul adapter has no runtime service contract: {backhaul_transport}"
+        )
+    ansible_variables.update(
+        {
+            "backhaul_ssh_tun_client_service_name": backhaul_adapter.client_service_name,
+            "backhaul_ssh_tun_client_container_name": backhaul_adapter.client_container_name,
+            "backhaul_ssh_tun_server_service_name": backhaul_adapter.server_service_name,
+            "backhaul_ssh_tun_server_container_name": backhaul_adapter.server_container_name,
+        }
+    )
+    ansible_variables["backhaul_ssh_tun_ssh_port"] = backhaul_ssh_tun_settings["port"]
     for name, value in (
-        ("cascade_ssh_tun_auth_private_key", transport["auth_private_key"]),
-        ("cascade_ssh_tun_auth_public_key", transport["auth_public_key"]),
-        ("cascade_ssh_tun_host_private_key", transport["host_private_key"]),
-        ("cascade_ssh_tun_host_public_key", transport["host_public_key"]),
+        ("backhaul_ssh_tun_auth_private_key", backhaul_ssh_tun_runtime["auth_private_key"]),
+        ("backhaul_ssh_tun_auth_public_key", backhaul_ssh_tun_runtime["auth_public_key"]),
+        ("backhaul_ssh_tun_host_private_key", backhaul_ssh_tun_runtime["host_private_key"]),
+        ("backhaul_ssh_tun_host_public_key", backhaul_ssh_tun_runtime["host_public_key"]),
     ):
         if value:
-            vars_[name] = value
+            ansible_variables[name] = value
     for name in (
         "block_domains",
         "block_ips",
@@ -677,13 +657,13 @@ def cascade_ansible_vars(state, deployment_id, local_root):
         "dns_direct_servers",
     ):
         routing = ingress_xray.get("routing_policy", {}).get("effective", {})
-        vars_[f"cascade_ingress_xray_{name}"] = ingress_xray.get(
+        ansible_variables[f"access_xray_{name}"] = ingress_xray.get(
             name, routing.get(name, [])
         )
     policy = ingress_xray.get("routing_policy", {})
     if isinstance(policy, dict):
-        vars_["cascade_ingress_xray_routing_policy_sha256"] = policy.get(
+        ansible_variables["access_xray_routing_policy_sha256"] = policy.get(
             "source_sha256", ""
         )
-    vars_["cascade_ingress_xray_share_link_path"] = f"{deployment_root}/share-links.txt"
-    return vars_
+    ansible_variables["access_xray_share_link_path"] = f"{deployment_root}/share-links.txt"
+    return ansible_variables

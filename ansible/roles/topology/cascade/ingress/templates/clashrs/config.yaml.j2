@@ -1,0 +1,15 @@
+port: 0
+socks-port: {{ topology_cascade_ingress_clash_port }}
+allow-lan: true
+bind-address: 0.0.0.0
+mode: direct
+log-level: silent
+interface-name: {{ backhaul_ssh_tun_interface | default(backhaul_ssh_tun_network_interface) }}
+tcp-concurrent: {{ topology_cascade_ingress_clash_tcp_concurrent | ternary('true', 'false') }}
+external-controller: 127.0.0.1:9090
+
+dns:
+  enable: true
+  ipv6: false
+  nameserver:
+    - {{ backhaul_ssh_tun_dns_address | default(backhaul_ssh_tun_network_vpn_gateway_ipv4) }}

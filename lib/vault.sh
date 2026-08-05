@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034
 
 read_secret() {
     local prompt="$1" value read_status
@@ -107,6 +108,11 @@ ensure_vault_password_file() {
         if [[ "$vault_view_status" == 0 ]]; then
             if json_file_valid "$checked_state"; then
                 rm -f "$checked_state"
+                if ! migrate_vault_schema_if_needed; then
+                    rm -f "$VAULT_PASSWORD_FILE"
+                    VAULT_PASSWORD_FILE=""
+                    return 1
+                fi
                 clear_screen
                 return 0
             fi
@@ -159,7 +165,7 @@ valid_server_name() {
 }
 
 json_file_valid() {
-    python3 - "$1" <<'PY'
+    PYTHONPATH="$ROOT_DIR" python3 - "$1" <<'PY'
 import json
 import sys
 
@@ -172,6 +178,54 @@ except (OSError, json.JSONDecodeError):
 if not isinstance(state, dict) or not isinstance(state.get("nodes"), dict):
     raise SystemExit(1)
 PY
+}
+
+vault_schema_v2_required() {
+    PYTHONPATH="$ROOT_DIR" python3 - "$1" <<'PY'
+import json
+import sys
+
+from scripts.vault_schema import assert_canonical_state
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    state = json.load(stream)
+
+try:
+    assert_canonical_state(state)
+except (TypeError, ValueError, KeyError):
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
+migrate_vault_schema_if_needed() {
+    local decrypted migrated
+    [[ -f "$VAULT_FILE" ]] || return 0
+    decrypted="$(mktemp "$RUNTIME_TMP_DIR/.vault-v1.XXXXXX")"
+    migrated="$(mktemp "$RUNTIME_TMP_DIR/.vault-v2.XXXXXX")"
+    if ! ansible-vault view --vault-password-file "$VAULT_PASSWORD_FILE" "$VAULT_FILE" >"$decrypted"; then
+        rm -f "$decrypted" "$migrated"
+        return 1
+    fi
+    if vault_schema_v2_required "$decrypted"; then
+        rm -f "$decrypted" "$migrated"
+        return 0
+    fi
+    clear_screen
+    printf '%s\n' "Migrating the encrypted Vault to schema v2..."
+    if ! python3 "$ROOT_DIR/scripts/migrate_vault.py" "$decrypted" "$migrated"; then
+        rm -f "$decrypted" "$migrated"
+        printf '%s\n' "Vault migration failed. The encrypted Vault was not changed." >&2
+        return 1
+    fi
+    if ! vault_save_unchecked "$migrated"; then
+        rm -f "$decrypted" "$migrated"
+        printf '%s\n' "Vault migration could not be saved. The encrypted Vault was not changed." >&2
+        return 1
+    fi
+    rm -f "$decrypted" "$migrated"
+    printf '%s\n' "Vault migration completed. Encrypted backup created before replacement."
+    return 0
 }
 
 quarantine_vault_file() {
@@ -196,21 +250,29 @@ quarantine_vault_file() {
 
 vault_ciphertext_valid() {
     [[ -s "$VAULT_FILE" ]] || return 1
-    awk '
-        NR == 1 {
-            fields = split($0, header, ";")
-            if (fields < 3 || fields > 4 || header[1] != "$ANSIBLE_VAULT" ||
-                header[2] !~ /^[0-9]+[.][0-9]+$/ ||
-                header[3] !~ /^[A-Za-z0-9_-]+$/ ||
-                (fields == 4 && header[4] !~ /^[A-Za-z0-9_-]+$/)) bad = 1
-            next
-        }
-        {
-            if ($0 !~ /^[0-9A-Fa-f]+$/ || length($0) % 2 != 0) bad = 1
-            payload = 1
-        }
-        END { exit (bad || !payload) ? 1 : 0 }
-    ' "$VAULT_FILE"
+    python3 - "$VAULT_FILE" <<'PY'
+import re
+import sys
+
+try:
+    lines = open(sys.argv[1], encoding="ascii").read().splitlines()
+except (OSError, UnicodeError):
+    raise SystemExit(1)
+
+if len(lines) < 2:
+    raise SystemExit(1)
+header = lines[0].split(";")
+if not 3 <= len(header) <= 4 or header[0] != "$ANSIBLE_VAULT":
+    raise SystemExit(1)
+if not re.fullmatch(r"[0-9]+\.[0-9]+", header[1]):
+    raise SystemExit(1)
+if not re.fullmatch(r"[A-Za-z0-9_-]+", header[2]):
+    raise SystemExit(1)
+if len(header) == 4 and not re.fullmatch(r"[A-Za-z0-9_-]+", header[3]):
+    raise SystemExit(1)
+if any(not line or not re.fullmatch(r"[0-9A-Fa-f]+", line) or len(line) % 2 for line in lines[1:]):
+    raise SystemExit(1)
+PY
 }
 
 vault_view() {
@@ -268,11 +330,8 @@ vault_state_command() {
     return "$command_status"
 }
 
-vault_save() {
+vault_save_unchecked() {
     local input="$1" encrypted checked vault_output
-    if ! ensure_vault_password_file; then
-        return 1
-    fi
     if ! json_file_valid "$input"; then
         printf '%s\n' "Refusing to save invalid Vault state." >&2
         return 1
@@ -299,6 +358,14 @@ vault_save() {
     rm -f "$checked"
 }
 
+vault_save() {
+    local input="$1"
+    if ! ensure_vault_password_file; then
+        return 1
+    fi
+    vault_save_unchecked "$input"
+}
+
 state_mutate() {
     local action="$1"; shift
     local before after
@@ -317,10 +384,86 @@ state_mutate() {
     rm -f "$before" "$after"
 }
 
+pending_install_begin() {
+    local candidate="$1" node_name="$2" transaction_id="$3" pending restored
+    pending="$(mktemp "$RUNTIME_TMP_DIR/.pending.XXXXXX")"
+    restored="$(mktemp "$RUNTIME_TMP_DIR/.pending-node.XXXXXX")"
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" begin-install \
+        "$node_name" \
+        "$transaction_id" <"$candidate" >"$pending"; then
+        rm -f "$pending" "$restored"
+        return 1
+    fi
+    if ! vault_save "$pending"; then
+        rm -f "$pending" "$restored"
+        return 1
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" restore-pending "$transaction_id" <"$pending" >"$restored"; then
+        rm -f "$pending" "$restored"
+        return 1
+    fi
+    mv -f "$restored" "$candidate"
+    rm -f "$pending"
+}
+
+pending_install_sync() {
+    local candidate="$1" transaction_id="$2" phase="$3" pending restored
+    [[ -n "$transaction_id" ]] || return 0
+    pending="$(mktemp "$RUNTIME_TMP_DIR/.pending.XXXXXX")"
+    restored="$(mktemp "$RUNTIME_TMP_DIR/.pending-node.XXXXXX")"
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" sync-pending \
+        "$transaction_id" "$phase" <"$candidate" >"$pending"; then
+        rm -f "$pending" "$restored"
+        return 1
+    fi
+    if ! vault_save "$pending"; then
+        rm -f "$pending" "$restored"
+        return 1
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" restore-pending "$transaction_id" <"$pending" >"$restored"; then
+        rm -f "$pending" "$restored"
+        return 1
+    fi
+    mv -f "$restored" "$candidate"
+    rm -f "$pending"
+}
+
+pending_install_commit() {
+    local transaction_id="$1" pending committed
+    pending="$(mktemp "$RUNTIME_TMP_DIR/.pending.XXXXXX")"
+    committed="$(mktemp "$RUNTIME_TMP_DIR/.committed.XXXXXX")"
+    if ! read_vault_state "$pending" || ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+        commit-pending "$transaction_id" <"$pending" >"$committed"; then
+        rm -f "$pending" "$committed"
+        return 1
+    fi
+    if ! vault_save "$committed"; then
+        rm -f "$pending" "$committed"
+        return 1
+    fi
+    rm -f "$pending" "$committed"
+}
+
+pending_install_abort() {
+    local transaction_id="$1" pending aborted
+    pending="$(mktemp "$RUNTIME_TMP_DIR/.pending.XXXXXX")"
+    aborted="$(mktemp "$RUNTIME_TMP_DIR/.aborted.XXXXXX")"
+    if ! read_vault_state "$pending" || ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+        abort-pending "$transaction_id" <"$pending" >"$aborted"; then
+        rm -f "$pending" "$aborted"
+        return 1
+    fi
+    if ! vault_save "$aborted"; then
+        rm -f "$pending" "$aborted"
+        return 1
+    fi
+    rm -f "$pending" "$aborted"
+}
+
 initialize_vault() {
     local temp
     temp="$(mktemp "$RUNTIME_TMP_DIR/.initial-state.XXXXXX")"
-    printf '{"nodes":{}}\n' >"$temp"
+    printf '%s\n' '{"vault_schema_version":2,"nodes":{},"pending_operations":{},"deployments":{}}' >"$temp"
     if ! vault_save "$temp"; then
         rm -f "$temp"
         show_result_screen "Vault creation failed."
@@ -613,7 +756,7 @@ restore_vault() {
         return 0
     fi
     archive="$SELECTED_VAULT_BACKUP"
-    entry="$(tar -tzf "$archive" 2>/dev/null | awk '$0 == "vault.json" { print; exit }')"
+    entry="$(tar -tzf "$archive" 2>/dev/null | grep -Fx 'vault.json' | head -n 1)"
     if [[ -z "$entry" ]]; then
         show_result_screen "Invalid backup: vault.json was not found."
         return 0

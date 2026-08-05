@@ -20,7 +20,7 @@ state = json.load(sys.stdin)
 node = state.get("nodes", {}).get(args.node)
 if node is None:
     raise SystemExit("node not found")
-xray = node.get("xray", {})
+xray = node.get("access", {}).get("xray_reality", {})
 keys = xray.get("access_keys", [])
 server_name = xray.get("server_name", "github.com")
 if not keys:

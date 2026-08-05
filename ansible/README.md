@@ -1,5 +1,11 @@
 # Ansible deployment
 
+The deployment contract is split into the common system layer, topology
+composition, access transports, and backhaul transports. See
+[`docs/architecture.md`](../docs/architecture.md) for the lifecycle contract
+and [`docs/adding-transport.md`](../docs/adding-transport.md) for the exact
+extension procedure.
+
 This branch deploys the simple two-transport Xray stack through Ansible.
 Ansible connects over SSH without an agent on the VPS. The Xray deployment
 uses one Docker container; no management container or server-side key state is

@@ -1,0 +1,11 @@
+---
+backhaul_ssh_tun_client_tun_mtu: 1200
+backhaul_ssh_tun_client_log_level: QUIET
+backhaul_ssh_tun_client_ipqos: throughput
+backhaul_ssh_tun_client_healthcheck_interval: 5s
+backhaul_ssh_tun_client_healthcheck_timeout: 2s
+backhaul_ssh_tun_client_healthcheck_retries: 2
+backhaul_ssh_tun_client_healthcheck_start_period: 5s
+backhaul_ssh_tun_client_startup_timeout_seconds: 180
+backhaul_ssh_tun_network_vpn_client_cidr_ipv4: 10.11.12.2/30
+backhaul_ssh_tun_tun_mtu: 1200

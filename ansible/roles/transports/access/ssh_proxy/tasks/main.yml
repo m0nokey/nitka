@@ -1,0 +1,219 @@
+---
+- name: Detect canonical SSH proxy directory and migration source
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop:
+    - { name: canonical, path: "{{ access_ssh_proxy_dir }}" }
+    - { name: migration_source, path: "{{ access_ssh_proxy_migration_source_dir }}" }
+  register: access_ssh_proxy_directory_stats
+  changed_when: false
+
+- name: Reject conflicting SSH proxy application directories
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (
+          (access_ssh_proxy_directory_stats.results[0].stat.exists | bool)
+          and (access_ssh_proxy_directory_stats.results[1].stat.exists | bool)
+        )
+    fail_msg: >-
+      Both {{ access_ssh_proxy_dir }} and {{ access_ssh_proxy_migration_source_dir }} exist.
+      Move or remove the migration source manually before continuing; Nitka
+      will never overwrite one application directory with another.
+
+- name: Create canonical SSH proxy parent directory for migration
+  ansible.builtin.file:
+    path: "{{ access_ssh_proxy_dir | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - access_ssh_proxy_directory_stats.results[1].stat.exists | bool
+    - not access_ssh_proxy_directory_stats.results[0].stat.exists | bool
+  changed_when: true
+
+- name: Migrate SSH proxy application directory to canonical path
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ access_ssh_proxy_migration_source_dir }}"
+      - "{{ access_ssh_proxy_dir }}"
+  when:
+    - access_ssh_proxy_directory_stats.results[1].stat.exists | bool
+    - not access_ssh_proxy_directory_stats.results[0].stat.exists | bool
+  changed_when: true
+
+- name: Validate standalone SSH transport input
+  ansible.builtin.assert:
+    that:
+      - access_ssh_proxy_external_port is number
+      - access_ssh_proxy_external_port | int > 1024
+      - access_ssh_proxy_external_port | int < 65536
+      - access_ssh_proxy_access_keys is sequence
+      - access_ssh_proxy_access_keys | length >= 1
+      - access_ssh_proxy_access_keys | length <= 50
+    fail_msg: >-
+      The standalone SSH transport requires a valid external port and one to
+      fifty access keys.
+
+- name: Validate standalone SSH access key entries
+  ansible.builtin.include_tasks: validate_access_key.yml
+  loop: "{{ access_ssh_proxy_access_keys }}"
+  loop_control:
+    label: "{{ item.username | default('unknown') }}"
+
+- name: Create standalone SSH transport directory
+  ansible.builtin.file:
+    path: "{{ access_ssh_proxy_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Check standalone SSH transport authorized key path
+  ansible.builtin.stat:
+    path: "{{ access_ssh_proxy_dir }}/authorized_keys"
+  register: access_ssh_proxy_authorized_keys_path
+
+- name: Remove obsolete standalone SSH authorized key file
+  ansible.builtin.file:
+    path: "{{ access_ssh_proxy_dir }}/authorized_keys"
+    state: absent
+  when: access_ssh_proxy_authorized_keys_path.stat.isreg | default(false)
+
+- name: Create standalone SSH transport authorized key directory
+  ansible.builtin.file:
+    path: "{{ access_ssh_proxy_dir }}/authorized_keys"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Remove stale standalone SSH transport authorized keys
+  ansible.builtin.find:
+    paths: "{{ access_ssh_proxy_dir }}/authorized_keys"
+    file_type: file
+  register: access_ssh_proxy_existing_keys
+
+- name: Delete stale standalone SSH transport authorized key files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ access_ssh_proxy_existing_keys.files }}"
+
+- name: Install standalone SSH transport authorized keys
+  ansible.builtin.copy:
+    content: "{{ item.authorized_key | trim }}\n"
+    dest: "{{ access_ssh_proxy_dir }}/authorized_keys/{{ item.username }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ access_ssh_proxy_access_keys }}"
+
+- name: Render standalone SSH transport Dockerfile
+  ansible.builtin.template:
+    src: Dockerfile.j2
+    dest: "{{ access_ssh_proxy_dir }}/Dockerfile"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render standalone SSH transport entrypoint
+  ansible.builtin.template:
+    src: entrypoint.sh.j2
+    dest: "{{ access_ssh_proxy_dir }}/entrypoint.sh"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render standalone SSH transport sshd configuration
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: "{{ access_ssh_proxy_dir }}/sshd_config"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render standalone SSH transport Compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ access_ssh_proxy_compose_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Validate standalone SSH transport Compose file
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ access_ssh_proxy_compose_path }}"
+      - config
+      - --quiet
+  args:
+    chdir: "{{ access_ssh_proxy_dir }}"
+  changed_when: false
+
+- name: Build standalone SSH transport image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ access_ssh_proxy_compose_path }}"
+      - build
+      - "{{ access_ssh_proxy_service_name }}"
+  args:
+    chdir: "{{ access_ssh_proxy_dir }}"
+  changed_when: true
+
+- name: Validate standalone SSH transport sshd configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ access_ssh_proxy_compose_path }}"
+      - run
+      - --rm
+      - --no-deps
+      - "{{ access_ssh_proxy_service_name }}"
+      - validate
+  args:
+    chdir: "{{ access_ssh_proxy_dir }}"
+  changed_when: false
+
+- name: Remove stale standalone SSH transport container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - container
+      - rm
+      - --force
+      - "{{ access_ssh_proxy_container_name }}"
+  register: access_ssh_proxy_stale_container
+  changed_when: access_ssh_proxy_stale_container.rc == 0
+  failed_when: false
+
+- name: Start standalone SSH transport
+  community.docker.docker_compose_v2:
+    project_src: "{{ access_ssh_proxy_dir }}"
+    files:
+      - compose.yml
+    services:
+      - "{{ access_ssh_proxy_service_name }}"
+    state: present
+
+- name: Wait for standalone SSH transport healthcheck
+  community.docker.docker_container_info:
+    name: "{{ access_ssh_proxy_container_name }}"
+  register: access_ssh_proxy_container_info
+  until:
+    - access_ssh_proxy_container_info.exists | bool
+    - access_ssh_proxy_container_info.container.State.Running | default(false) | bool
+    - access_ssh_proxy_container_info.container.State.Health.Status | default('') == 'healthy'
+  retries: 30
+  delay: 2

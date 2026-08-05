@@ -1,0 +1,82 @@
+name: cascade-egress
+
+services:
+  {{ backhaul_ssh_tun_service_name | default('ssh_tun_server') }}:
+    container_name: {{ backhaul_ssh_tun_container_name | default('cascade-ssh-tun-server') }}
+    build:
+      context: ./{{ backhaul_ssh_tun_remote_dir_name | default('backhaul/ssh-tun') }}
+    image: local/cascade-ssh-tun-server:latest
+    env_file:
+      - ./{{ backhaul_ssh_tun_remote_dir_name | default('backhaul/ssh-tun') }}/security.env
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./{{ backhaul_ssh_tun_remote_dir_name | default('backhaul/ssh-tun') }}/authorized_keys:/run/cascade/authorized_keys:ro
+      - ./{{ backhaul_ssh_tun_remote_dir_name | default('backhaul/ssh-tun') }}/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key:ro
+      - ./{{ backhaul_ssh_tun_remote_dir_name | default('backhaul/ssh-tun') }}/ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck"]
+      interval: {{ backhaul_ssh_tun_healthcheck_interval | default('30s') }}
+      timeout: {{ backhaul_ssh_tun_healthcheck_timeout | default('5s') }}
+      retries: {{ backhaul_ssh_tun_healthcheck_retries | default(3) }}
+      start_period: {{ backhaul_ssh_tun_healthcheck_start_period | default('20s') }}
+    ports:
+      - "{{ backhaul_ssh_tun_external_port | default(backhaul_ssh_tun_ssh_port) }}:{{ backhaul_ssh_tun_internal_port | default(backhaul_ssh_tun_container_port) }}"
+    networks:
+      cascade_egress:
+        ipv4_address: {{ backhaul_ssh_tun_container_ipv4 | default(backhaul_ssh_tun_network_container_vpn_ipv4) }}
+    dns_search: []
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    pids_limit: 150
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.50
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  unbound:
+    container_name: cascade-unbound
+    build:
+      context: ./dns
+    image: local/cascade-unbound:latest
+    depends_on:
+      {{ backhaul_ssh_tun_service_name | default('ssh_tun_server') }}:
+        condition: service_healthy
+    network_mode: "service:{{ backhaul_ssh_tun_service_name | default('ssh_tun_server') }}"
+    volumes:
+      - ./dns/unbound.conf:/etc/unbound/unbound.conf:ro
+      - ./dns/unbound.conf.d:/etc/unbound/unbound.conf.d:ro
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    dns_search: []
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  cascade_egress:
+    name: cascade_egress
+    driver: bridge
+    ipam:
+      config:
+        - subnet: {{ backhaul_ssh_tun_container_subnet | default(backhaul_ssh_tun_network_container_subnet_cidr_ipv4) }}
+          gateway: {{ backhaul_ssh_tun_container_gateway | default(backhaul_ssh_tun_network_container_gateway_ipv4) }}

@@ -11,10 +11,11 @@ USER_BACKUP_DIR="$BACKUPS_DIR/user"
 SYSTEM_BACKUP_DIR="$BACKUPS_DIR/system"
 RUNTIME_TMP_DIR="${TMPDIR:-/tmp}/nitka-${BASHPID}"
 readonly VAULT_BACKUP_KEEP_COUNT=20
-DEBUG_MODE=0
+DEBUG_MODE="${NITKA_DEBUG:-0}"
 PIPELINE_ACTIVE=0
 PIPELINE_TITLE=''
 PIPELINE_OPERATION=''
+PIPELINE_PLAYBOOK=''
 PIPELINE_PERCENT=0
 PIPELINE_LABEL=''
 PIPELINE_FRAME=0
@@ -38,6 +39,7 @@ readonly UNAVAILABLE_BOOTSTRAP_CONNECTION=127
 readonly BOOTSTRAP_PREFLIGHT_FAILED=128
 # Internal status used to refresh the server list after successful removal.
 readonly NODE_REMOVED_STATUS=124
+PENDING_TRANSACTION_ID=""
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 rm -f "$STATE_DIR"/.vault.* 2>/dev/null || true
@@ -78,6 +80,7 @@ source "$ROOT_DIR/lib/dns.sh"
 source "$ROOT_DIR/lib/ansible.sh"
 source "$ROOT_DIR/lib/deployment.sh"
 source "$ROOT_DIR/lib/access_keys.sh"
+source "$ROOT_DIR/lib/ssh_proxy.sh"
 source "$ROOT_DIR/lib/security.sh"
 source "$ROOT_DIR/lib/nodes.sh"
 
@@ -204,6 +207,43 @@ add_node_password_prompt() {
         return 1
     fi
     ADD_NODE_PASSWORD="$REPLY"
+}
+
+add_node_access_transport_prompt() {
+    local choice error=''
+    while true; do
+        clear_screen
+        menu_heading "Add VPN server"
+        printf '%s\n' "Choose a VPN/proxy protocol for this VPS."
+        [[ -n "$error" ]] && printf '%s\n' "$error"
+        echo
+        menu_option 1 "Xray REALITY"
+        printf '%b%s%b\n' "$COLOR_MUTED_ITALIC" "   Xray with two client ports: REALITY Vision and REALITY XHTTP." "$COLOR_RESET"
+        menu_option 2 "SSH proxy"
+        printf '%b%s%b\n' "$COLOR_MUTED_ITALIC" "   A fast temporary TCP proxy based on OpenSSH." "$COLOR_RESET"
+        printf '%b%s%b\n' "$COLOR_MUTED_ITALIC" "   Native UDP is not supported by OpenSSH." "$COLOR_RESET"
+        printf '%b%s%b\n' "$COLOR_MUTED_ITALIC" "   Optional external UDP relay uses UDP-over-TCP and may be unstable" "$COLOR_RESET"
+        printf '%b%s%b\n' "$COLOR_MUTED_ITALIC" "   for calls, games, and realtime audio." "$COLOR_RESET"
+        printf '%b%s%b\n' "$COLOR_MUTED_ITALIC" "   VPS hardening and nightly updates apply to both options." "$COLOR_RESET"
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' '1, 2, or b, m, i, x'; then
+            continue
+        fi
+        case "$choice" in
+            1) ADD_NODE_ACCESS_TRANSPORT=xray-reality; return 0 ;;
+            2) ADD_NODE_ACCESS_TRANSPORT=ssh; return 0 ;;
+            b) return 1 ;;
+            m) MAIN_MENU_REQUESTED=1; return 1 ;;
+            i) show_info add-node ;;
+            x) exit_tui ;;
+            *) error="Invalid choice. Enter 1, 2, b, m, i, or x." ;;
+        esac
+    done
 }
 
 add_node_domain_prompt() {
@@ -366,10 +406,12 @@ review_node_connection() {
         clear_screen
         menu_heading "Review VPS connection"
         echo
-        printf '%-16s %s\n' "IP address:" "$1"
-        printf '%-16s %s\n' "User:" "$2"
-        printf '%-16s %s\n' "Port:" "$3"
-        printf '%-16s %s\n' "Password:" "entered"
+        ui_print_table "  " "  " 0 \
+            $'FIELD\tVALUE' \
+            $'IP address:\t'"$1" \
+            $'User:\t'"$2" \
+            $'Port:\t'"$3" \
+            $'Password:\tentered'
         echo
         menu_option 1 Continue
         menu_option 2 Edit
@@ -430,8 +472,10 @@ bootstrap_connection_failure_menu() {
         clear_screen
         printf '%s\n' "VPS SSH connection unavailable"
         printf '%s\n' "The VPS did not accept an SSH connection."
-        printf '%-16s %s\n' "IP address:" "$host"
-        printf '%-16s %s\n' "Port:" "$port"
+        ui_print_table "  " "  " 0 \
+            $'FIELD\tVALUE' \
+            $'IP address:\t'"$host" \
+            $'Port:\t'"$port"
         printf '%s\n' "Check the IP address and SSH port."
         echo
         menu_option 1 "Edit VPS connection"
@@ -514,6 +558,50 @@ bootstrap_preflight_failure_menu() {
     done
 }
 
+pending_install_recovery_menu() {
+    local host="$1" phase="$2" choice
+    while true; do
+        clear_screen
+        menu_heading "Incomplete installation found"
+        echo
+        printf '%s\n' "The previous installation did not finish."
+        printf '%s\n' "The VPS may contain partially installed components."
+        ui_print_table "  " "  " 0 \
+            $'FIELD\tVALUE' \
+            $'VPS address:\t'"$host" \
+            $'Last phase:\t'"$phase"
+        echo
+        menu_option 1 "Resume previous installation"
+        printf '%s\n' "   Continue with the saved SSH key, port, and settings."
+        printf '%s\n' "   Use this after a temporary failure, such as a failed healthcheck."
+        menu_option 2 "Abort and clean the VPS"
+        printf '%s\n' "   Remove the partial installation and restore the original SSH access."
+        menu_option 3 "Start over after manual cleanup"
+        printf '%s\n' "   Use this only if you already cleaned the VPS yourself."
+        echo
+        printf '%s\n' "The main Vault state is unchanged until installation finishes successfully."
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' '1, 2, 3, or b, m, i, x'; then
+            continue
+        fi
+        case "$choice" in
+            1) return 0 ;;
+            2) return 1 ;;
+            3) return 3 ;;
+            b|B) return 2 ;;
+            m|M) MAIN_MENU_REQUESTED=1; return 2 ;;
+            i|I) show_info install-recovery ;;
+            x|X) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+}
+
 add_vpn_server_menu() {
     local choice
     while true; do
@@ -521,7 +609,7 @@ add_vpn_server_menu() {
         echo
         menu_heading "Add VPN server"
         echo
-        menu_option 1 "Single-node Xray"
+        menu_option 1 "Standalone VPN"
         menu_option 2 "Cascade VPN"
         echo
         menu_control b back
@@ -544,6 +632,7 @@ add_vpn_server_menu() {
 
 
 while true; do
+    recover_pending_installation || true
     clear_screen
     echo
     menu_option 1 "VPN servers"

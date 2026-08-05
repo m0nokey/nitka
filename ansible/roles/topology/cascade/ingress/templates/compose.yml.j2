@@ -1,0 +1,118 @@
+name: cascade-ingress
+
+services:
+  {{ backhaul_ssh_tun_service_name | default('ssh_tun_client') }}:
+    container_name: {{ backhaul_ssh_tun_container_name | default('cascade-ssh-tun-client') }}
+    build:
+      context: ./{{ backhaul_ssh_tun_remote_dir_name | default('backhaul/ssh-tun') }}
+    image: local/cascade-ssh-tun-client:latest
+    env_file:
+      - ./{{ backhaul_ssh_tun_remote_dir_name | default('backhaul/ssh-tun') }}/security.env
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck"]
+      interval: {{ backhaul_ssh_tun_healthcheck_interval | default('5s') }}
+      timeout: {{ backhaul_ssh_tun_healthcheck_timeout | default('2s') }}
+      retries: {{ backhaul_ssh_tun_healthcheck_retries | default(2) }}
+      start_period: {{ backhaul_ssh_tun_healthcheck_start_period | default('5s') }}
+    volumes:
+      - ./{{ backhaul_ssh_tun_remote_dir_name | default('backhaul/ssh-tun') }}:/ssh:ro
+    dns:
+      - {{ backhaul_ssh_tun_dns_address | default(backhaul_ssh_tun_network_vpn_gateway_ipv4) }}
+    dns_search: []
+    networks:
+      - cascade_ingress
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    pids_limit: 100
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.50
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  clashrs:
+    container_name: cascade-clashrs
+    image: local/cascade-clash-rs:latest
+    network_mode: "service:{{ backhaul_ssh_tun_service_name | default('ssh_tun_client') }}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    depends_on:
+      {{ backhaul_ssh_tun_service_name | default('ssh_tun_client') }}:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./{{ topology_cascade_ingress_routing_dir_name }}/config.yaml:/etc/clash/config.yaml:ro
+    command: ["-d", "/etc/clash", "--compatibility"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "-w", "2", "127.0.0.1", "{{ topology_cascade_ingress_clash_port }}"]
+      interval: {{ topology_cascade_ingress_clash_healthcheck_interval | default('5s') }}
+      timeout: {{ topology_cascade_ingress_clash_healthcheck_timeout | default('2s') }}
+      retries: {{ topology_cascade_ingress_clash_healthcheck_retries | default(2) }}
+      start_period: {{ topology_cascade_ingress_clash_healthcheck_start_period | default('5s') }}
+    dns_search: []
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    pids_limit: 100
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.50
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  xray:
+    container_name: cascade-xray
+    image: local/cascade-xray-core:auto
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    depends_on:
+      clashrs:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./{{ topology_cascade_ingress_access_dir_name }}/config.json:/etc/xray/config.json:ro
+    command: ["run", "-c", "/etc/xray/config.json"]
+    ports:
+      - "{{ access_xray_xhttp_port }}:{{ access_xray_xhttp_port }}"
+      - "{{ access_xray_reality_port }}:{{ access_xray_reality_port }}"
+    networks:
+      - cascade_ingress
+    dns_search: []
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    pids_limit: 150
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.75
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  cascade_ingress:
+    name: cascade_ingress
+    driver: bridge

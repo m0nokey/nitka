@@ -1,0 +1,28 @@
+---
+- name: Select SSH TUN endpoint directory
+  ansible.builtin.set_fact:
+    backhaul_ssh_tun_remove_dir: >-
+      {{ topology_cascade_ingress_remote_dir if backhaul_ssh_tun_endpoint == 'client'
+         else topology_cascade_egress_remote_dir }}
+    backhaul_ssh_tun_remove_compose: >-
+      {{ (topology_cascade_ingress_remote_dir if backhaul_ssh_tun_endpoint == 'client'
+          else topology_cascade_egress_remote_dir) ~ '/compose.yml' }}
+  changed_when: false
+- name: Check SSH TUN Compose file before removal
+  ansible.builtin.stat:
+    path: "{{ backhaul_ssh_tun_remove_compose }}"
+  register: backhaul_ssh_tun_compose_stat
+- name: Remove SSH TUN Compose project
+  community.docker.docker_compose_v2:
+    project_src: "{{ backhaul_ssh_tun_remove_dir }}"
+    files:
+      - compose.yml
+    state: absent
+    remove_orphans: true
+    remove_images: all
+    remove_volumes: true
+  when: backhaul_ssh_tun_compose_stat.stat.exists
+- name: Remove SSH TUN endpoint directory
+  ansible.builtin.file:
+    path: "{{ backhaul_ssh_tun_remove_dir }}"
+    state: absent

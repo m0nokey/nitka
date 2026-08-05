@@ -1,0 +1,3 @@
+---
+- name: Roll back SSH TUN installation
+  ansible.builtin.include_tasks: remove.yml

@@ -39,7 +39,7 @@ example with client-side ad and tracking rejects, not a universal default.
 The Xray routing policy is
 [`cascade/routing/xray/ingress-routing.ru.example.yml`](cascade/routing/xray/ingress-routing.ru.example.yml).
 The traffic flow and blocking layers are documented with the Cascade topology
-in [`ansible/roles/topologies/cascade/README.md`](../ansible/roles/topologies/cascade/README.md).
+in [`ansible/roles/topology/cascade/README.md`](../ansible/roles/topology/cascade/README.md).
 
 The policy is imported into Nitka and rendered into the ingress Xray
 configuration. It is not copied directly to a VPS or imported into a client

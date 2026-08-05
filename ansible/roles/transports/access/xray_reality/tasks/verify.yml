@@ -1,0 +1,15 @@
+---
+- name: Verify standalone Xray container
+  community.docker.docker_container_info:
+    name: "{{ access_xray_container_name }}"
+  register: access_xray_verify_container
+  changed_when: false
+  when: access_xray_topology | default('standalone') == 'standalone'
+- name: Require a healthy standalone Xray container
+  ansible.builtin.assert:
+    that:
+      - access_xray_verify_container.exists | bool
+      - access_xray_verify_container.container.State.Running | default(false) | bool
+      - access_xray_verify_container.container.State.Health.Status | default('') == 'healthy'
+    fail_msg: The Xray REALITY adapter did not report a healthy container.
+  when: access_xray_topology | default('standalone') == 'standalone'

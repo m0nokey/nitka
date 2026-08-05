@@ -56,12 +56,30 @@ jobs:
           bash -n tests/test_navigation.sh
           bash -n tests/test_vault_recovery.sh
           bash -n tests/test_ansible_templates.sh
+          bash -n tests/test_bash_safety.sh
+          bash -n tests/test_ansible_config.sh
+          bash -n tests/test_install_transaction.sh
+          bash -n tests/test_ui_tables.sh
 
       - name: Run ShellCheck
         run: >-
           shellcheck --severity=error controller/entrypoint.sh lib/*.sh run.sh
           tests/test_navigation.sh tests/test_vault_recovery.sh
-          tests/test_ansible_templates.sh
+          tests/test_ansible_templates.sh tests/test_bash_safety.sh
+          tests/test_ansible_config.sh tests/test_install_transaction.sh
+          tests/test_ui_tables.sh
+
+      - name: Check Bash local declaration safety
+        run: bash tests/test_bash_safety.sh
+
+      - name: Check dynamic table rendering
+        run: bash tests/test_ui_tables.sh
+
+      - name: Check Ansible remote temporary directory
+        run: bash tests/test_ansible_config.sh
+
+      - name: Check install transaction ordering
+        run: bash tests/test_install_transaction.sh
 
       - name: Run TUI navigation smoke test
         run: bash tests/test_navigation.sh
@@ -89,15 +107,18 @@ jobs:
       - name: Check Ansible syntax
         run: |
           for playbook in \
-            ansible/bootstrap.yml \
-            ansible/harden_ssh.yml \
-            ansible/preflight.yml \
-            ansible/remove.yml \
-            ansible/restart.yml \
-            ansible/rotate-ssh.yml \
-            ansible/cascade_ingress.yml \
-            ansible/cascade_egress.yml \
-            ansible/site.yml; do
+            ansible/playbooks/preflight.yml \
+            ansible/playbooks/bootstrap.yml \
+            ansible/playbooks/harden_ssh.yml \
+            ansible/playbooks/finalize_ssh.yml \
+            ansible/playbooks/deploy_standalone.yml \
+            ansible/playbooks/deploy_cascade.yml \
+            ansible/playbooks/deploy_cascade_ingress.yml \
+            ansible/playbooks/deploy_cascade_egress.yml \
+            ansible/playbooks/manage_management_ssh.yml \
+            ansible/playbooks/rotate_management_ssh.yml \
+            ansible/playbooks/restart.yml \
+            ansible/playbooks/remove.yml; do
             ansible-playbook --syntax-check \
               -i 'xray_nodes,' -c local "$playbook"
           done
@@ -124,7 +145,7 @@ jobs:
       - name: Build server Unbound image
         run: >-
           docker build --pull --tag nitka-unbound:ci
-          --file ansible/roles/xray/templates/unbound.Dockerfile.j2 .
+          --file ansible/roles/transports/access/xray_reality/templates/unbound.Dockerfile.j2 .
 
       - name: Smoke-test controller image
         run: |

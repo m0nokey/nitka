@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+host_key_dir=/etc/ssh/host_keys
+authorized_keys_dir=/etc/ssh/authorized_keys.in
+
+if [ ! -d "$authorized_keys_dir" ]; then
+    echo "No SSH authorized key directory found in $authorized_keys_dir" >&2
+    exit 1
+fi
+
+mkdir -p /run/sshd "$host_key_dir"
+chmod 0755 /var/ssh
+
+{% for access_key in access_ssh_proxy_access_keys %}
+authorized_key="$authorized_keys_dir/{{ access_key.username }}"
+runtime_authorized_keys="/var/ssh/{{ access_key.username }}/authorized_keys"
+if [ ! -s "$authorized_key" ]; then
+    echo "No SSH public key found for {{ access_key.username }}" >&2
+    exit 1
+fi
+install -d -m 0700 -o {{ access_key.username }} -g {{ access_ssh_proxy_group }} \
+    "/var/ssh/{{ access_key.username }}"
+install -o {{ access_key.username }} -g {{ access_ssh_proxy_group }} -m 0600 \
+    "$authorized_key" "$runtime_authorized_keys"
+{% endfor %}
+
+if [ ! -s "$host_key_dir/ssh_host_ed25519_key" ]; then
+    ssh-keygen -q -t ed25519 -N "" \
+        -f "$host_key_dir/ssh_host_ed25519_key"
+fi
+
+chmod 0600 "$host_key_dir/ssh_host_ed25519_key"
+chmod 0644 "$host_key_dir/ssh_host_ed25519_key.pub"
+
+/usr/sbin/sshd -t -f /etc/ssh/sshd_config
+
+if [ "${1:-}" = validate ]; then
+    exit 0
+fi
+
+exec /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config

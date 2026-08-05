@@ -17,6 +17,7 @@ services:
       TERM: ${TERM:-xterm-256color}
       COLORTERM: ${COLORTERM:-truecolor}
       ANSIBLE_FORCE_COLOR: "true"
+      NITKA_DEBUG: ${NITKA_DEBUG:-0}
       XDG_STATE_HOME: /state
       NITKA_HOST_STATE_DIR: ${XDG_STATE_HOME:-${HOME}/.local/state}/nitka
     read_only: true

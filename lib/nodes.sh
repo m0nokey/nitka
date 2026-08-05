@@ -48,6 +48,37 @@ PY
     rm -f "$state"
 }
 
+cascade_transport_summary() {
+    local deployment_id="$1" state status
+    state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-transport-summary.XXXXXX")"
+    if ! read_vault_state "$state"; then
+        rm -f "$state"
+        return 1
+    fi
+    python3 "$ROOT_DIR/scripts/state_cli.py" transport-summary "$deployment_id" <"$state"
+    status=$?
+    rm -f "$state"
+    return "$status"
+}
+
+cascade_transport_label() {
+    case "$1" in
+        xray-reality) printf '%s\n' "Xray REALITY" ;;
+        ssh-tun) printf '%s\n' "SSH TUN" ;;
+        naiveproxy) printf '%s\n' "NaiveProxy" ;;
+        hysteria2) printf '%s\n' "Hysteria2" ;;
+        wireguard) printf '%s\n' "WireGuard" ;;
+        *) printf '%s\n' "${1:-unknown}" ;;
+    esac
+}
+
+cascade_transport_name() {
+    local deployment_id="$1" plane="$2" summary
+    summary="$(cascade_transport_summary "$deployment_id")" || return 1
+    python3 -c 'import json, sys; print(json.load(sys.stdin)[sys.argv[1]]["transport"])' \
+        "$plane" <<<"$summary"
+}
+
 select_cascade_node() {
     local deployment_id="$1" choice
     while true; do
@@ -68,7 +99,13 @@ select_cascade_node() {
             2) CASCADE_SELECTED_NODE="$(cascade_node "$deployment_id" egress)"; return 0 ;;
             b) return 1 ;;
             m) MAIN_MENU_REQUESTED=1; return 1 ;;
-            i) show_info status ;;
+            i)
+                if [[ "$access_transport" == ssh-proxy ]]; then
+                    show_info status ssh_proxy
+                else
+                    show_info status
+                fi
+                ;;
             x) exit_tui ;;
             *) invalid_choice ;;
         esac
@@ -196,8 +233,286 @@ update_cascade() {
     return 1
 }
 
+replace_cascade_vps() {
+    local deployment_id="$1" role="$2"
+    local before egress_state shared_state after captured final
+    local ingress_node old_node new_node old_host new_host old_country new_country
+    local choice rollback_status=0 role_label server_name port_mode dns_profile dns_lists
+    local vision_port xhttp_port
+    local -a port_args=()
+    before="$(mktemp "$RUNTIME_TMP_DIR/.cascade-replace-before.XXXXXX")"
+    egress_state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-replace-egress.XXXXXX")"
+    shared_state="$(mktemp "$RUNTIME_TMP_DIR/.cascade-replace-shared.XXXXXX")"
+    after="$(mktemp "$RUNTIME_TMP_DIR/.cascade-replace-after.XXXXXX")"
+    captured="$(mktemp "$RUNTIME_TMP_DIR/.cascade-replace-captured.XXXXXX")"
+    final="$(mktemp "$RUNTIME_TMP_DIR/.cascade-replace-final.XXXXXX")"
+
+    if ! read_vault_state "$before"; then
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        return 1
+    fi
+    ingress_node="$(python3 - "$deployment_id" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[2], encoding="utf-8"))
+print(state["deployments"][sys.argv[1]]["roles"]["ingress"]["node"])
+PY
+)"
+    old_node="$(python3 - "$deployment_id" "$role" "$before" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[3], encoding="utf-8"))
+print(state["deployments"][sys.argv[1]]["roles"][sys.argv[2]]["node"])
+PY
+)"
+    old_host="$(python3 - "$old_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]]["host"])
+PY
+)"
+    old_country="$(python3 - "$old_node" "$before" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]].get("country", "N/A"))
+PY
+)"
+
+    if ! collect_cascade_node_access "$role"; then
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        return 0
+    fi
+    new_host="$CASCADE_NODE_HOST"
+    if [[ -n "$(find_node_by_connection "$before" "$new_host" "$CASCADE_NODE_PORT")" ]]; then
+        unset CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        show_result_screen "The replacement VPS already exists in the Vault. Choose a different VPS."
+        return 0
+    fi
+    if [[ "$role" == ingress ]]; then
+        if ! add_node_domain_prompt; then
+            unset CASCADE_NODE_PASSWORD
+            rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+            return 0
+        fi
+        server_name="$ADD_NODE_SERVER_NAME"
+        unset ADD_NODE_SERVER_NAME
+        if ! add_node_port_mode_prompt; then
+            unset CASCADE_NODE_PASSWORD
+            rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+            return 0
+        fi
+        port_mode="$ADD_NODE_PORT_MODE"
+        vision_port="${ADD_NODE_VISION_PORT:-}"
+        xhttp_port="${ADD_NODE_XHTTP_PORT:-}"
+        unset ADD_NODE_PORT_MODE ADD_NODE_VISION_PORT ADD_NODE_XHTTP_PORT
+        if [[ "$port_mode" == manual ]]; then
+            port_args=(--vision-port "$vision_port" --xhttp-port "$xhttp_port")
+        fi
+        unset DNS_FILTER_CURRENT_PROFILE DNS_FILTER_LISTS
+        if ! select_dns_profile initial; then
+            unset CASCADE_NODE_PASSWORD
+            rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+            return 0
+        fi
+        dns_profile="$DNS_FILTER_PROFILE"
+        dns_lists="${DNS_FILTER_LISTS:-}"
+        role_label="ingress"
+    else
+        server_name="github.com"
+        port_mode="random"
+        dns_profile="disabled"
+        dns_lists=""
+        role_label="egress"
+    fi
+    if ! NITKA_BOOTSTRAP_USER="$CASCADE_NODE_USER" \
+        NITKA_BOOTSTRAP_PASSWORD="$CASCADE_NODE_PASSWORD" \
+        NITKA_BOOTSTRAP_PORT="$CASCADE_NODE_PORT" \
+        python3 "$ROOT_DIR/scripts/state_cli.py" \
+        --node-role "$role" --server-name "$server_name" --port-mode "$port_mode" \
+        "${port_args[@]}" --dns-profile "$dns_profile" --dns-lists "$dns_lists" \
+        add-node auto "$new_host" <"$before" >"$egress_state"; then
+        unset CASCADE_NODE_PASSWORD
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        return 1
+    fi
+    new_node="$(cascade_new_node_name "$before" "$egress_state")"
+    new_country="$(python3 - "$new_node" "$egress_state" <<'PY'
+import json
+import sys
+
+print(json.load(open(sys.argv[2], encoding="utf-8"))["nodes"][sys.argv[1]].get("country", "N/A"))
+PY
+    )"
+    unset CASCADE_NODE_PASSWORD
+    if [[ "$role" == egress ]]; then
+        if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+            share-management-key "$ingress_node" "$new_node" \
+            <"$egress_state" >"$shared_state"; then
+            rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+            return 1
+        fi
+    else
+        cp "$egress_state" "$shared_state"
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+        replace-cascade-node "$deployment_id" "$role" "$new_node" \
+        <"$shared_state" >"$after"; then
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        return 1
+    fi
+
+    while true; do
+        clear_screen
+        menu_heading "Replace Cascade $role_label VPS"
+        echo
+        printf '%s\n' "Current $role_label:"
+        printf '%s\n' "  IP address: $old_host"
+        printf '%s\n' "  Country:    $old_country"
+        echo
+        printf '%s\n' "New $role_label:"
+        printf '%s\n' "  IP address: $new_host"
+        printf '%s\n' "  Country:    $new_country"
+        echo
+        if [[ "$role" == ingress ]]; then
+            printf '%s\n' "The egress VPS will remain unchanged."
+            printf '%s\n' "Client access keys and routing policy will remain unchanged."
+        else
+            printf '%s\n' "The ingress VPS and client access keys will remain unchanged."
+        fi
+        printf '%s\n' "The old $role_label remains in the Vault until the replacement is verified."
+        echo
+        menu_option 1 Continue
+        menu_option 2 Cancel
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' '1 or 2, or b, m, i, x'; then continue; fi
+        case "$choice" in
+            1) break ;;
+            2|b) rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"; return 0 ;;
+            m) MAIN_MENU_REQUESTED=1; rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"; return 0 ;;
+            i) show_info status ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+
+    pipeline_start "Replacing Cascade $role_label VPS" install
+    if ! deploy_node "$new_node" "$after" "" 1 bootstrap-only "cascade-$role"; then
+        pipeline_abort
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        show_result_screen "New $role_label bootstrap failed. The existing Cascade and Vault were not changed."
+        return 1
+    fi
+    if [[ "$role" == egress ]]; then
+        if ! run_cascade_playbooks "$deployment_id" "$after" egress-only; then
+            pipeline_abort
+            rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+            show_result_screen "New egress deployment failed. The existing Cascade and Vault were not changed."
+            return 1
+        fi
+        if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+            capture-cascade-transport-keys "$deployment_id" \
+            "$STATE_DIR/cascade/$deployment_id/ssh" \
+            <"$after" >"$captured"; then
+            pipeline_abort
+            rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+            show_result_screen "New egress transport keys could not be captured. The existing Vault was not changed."
+            return 1
+        fi
+    else
+        cp "$after" "$captured"
+    fi
+    if ! run_cascade_playbooks "$deployment_id" "$captured" ingress-only; then
+        if run_cascade_playbooks "$deployment_id" "$before" ingress-only; then
+            rollback_status=1
+        fi
+        pipeline_abort
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        if ((rollback_status)); then
+            show_result_screen "Ingress verification failed. The previous Cascade configuration was restored." \
+                "The existing Vault was not changed."
+        else
+            show_result_screen "Ingress verification failed and automatic rollback was unsuccessful." \
+                "The existing Vault was not changed. Check the ingress VPS."
+        fi
+        return 1
+    fi
+    if ! python3 "$ROOT_DIR/scripts/state_cli.py" \
+        remove-node "$old_node" <"$captured" >"$final"; then
+        pipeline_abort
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        show_result_screen "The replacement was verified, but the old $role_label could not be removed from the new Vault state."
+        return 1
+    fi
+    if ! vault_save "$final"; then
+        if run_cascade_playbooks "$deployment_id" "$before" ingress-only; then
+            rollback_status=1
+        fi
+        pipeline_abort
+        rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+        if ((rollback_status)); then
+            show_result_screen "Vault save failed. The previous Cascade configuration was restored." \
+                "The old $role_label remains in the Vault."
+        else
+            show_result_screen "Vault save failed and automatic rollback was unsuccessful." \
+                "The previous Cascade state remains recorded locally; check the ingress VPS."
+        fi
+        return 1
+    fi
+    rm -f "$before" "$egress_state" "$shared_state" "$after" "$captured" "$final"
+    pipeline_complete "Cascade $role_label VPS replaced successfully." 1
+    return 0
+}
+
+replace_cascade_node_menu() {
+    local deployment_id="$1" choice
+    local backhaul_transport backhaul_label access_transport access_label
+    while true; do
+        backhaul_transport="$(cascade_transport_name "$deployment_id" backhaul 2>/dev/null || printf '%s' unknown)"
+        backhaul_label="$(cascade_transport_label "$backhaul_transport")"
+        access_transport="$(cascade_transport_name "$deployment_id" access 2>/dev/null || printf '%s' unknown)"
+        access_label="$(cascade_transport_label "$access_transport")"
+        clear_screen
+        menu_heading "Replace Cascade VPS"
+        echo
+        printf '%s\n' "Choose the VPS role to replace."
+        printf '%s\n' "Client access transport: $access_label."
+        printf '%s\n' "Ingress-to-egress transport: $backhaul_label."
+        printf '%s\n' "Replacing a VPS changes its IP but keeps both selected transports."
+        printf '%s\n' "If DPI blocks a transport itself, a separate transport migration is required."
+        echo
+        menu_option 1 "Replace ingress VPS"
+        menu_option 2 "Replace egress VPS"
+        echo
+        menu_control b back
+        menu_control m main
+        menu_control i info
+        menu_control x exit
+        echo
+        if ! read_required_choice choice '?: ' '1 or 2, or b, m, i, x'; then continue; fi
+        case "$choice" in
+            1) replace_cascade_vps "$deployment_id" ingress || true; return ;;
+            2) replace_cascade_vps "$deployment_id" egress || true; return ;;
+            b) return ;;
+            m) MAIN_MENU_REQUESTED=1; return ;;
+            i) show_info cascade-server ;;
+            x) exit_tui ;;
+            *) invalid_choice ;;
+        esac
+    done
+}
+
 remove_cascade() {
-    local deployment_id="$1" confirm ingress_node egress_node
+    local deployment_id="$1" confirm ingress_node egress_node state_file cascade_extra
     while true; do
         clear_screen
         menu_heading "Delete VPN server:"
@@ -221,15 +536,27 @@ remove_cascade() {
     done
     ingress_node="$(cascade_node "$deployment_id" ingress)"
     egress_node="$(cascade_node "$deployment_id" egress)"
+    state_file="$(mktemp "$RUNTIME_TMP_DIR/.cascade-remove-state.XXXXXX")"
+    cascade_extra="$(mktemp "$RUNTIME_TMP_DIR/.cascade-remove-extra.XXXXXX")"
+    if ! read_vault_state "$state_file" || \
+        ! python3 "$ROOT_DIR/scripts/state_cli.py" extract-cascade "$deployment_id" \
+            <"$state_file" >"$cascade_extra"; then
+        rm -f "$state_file" "$cascade_extra"
+        show_result_screen "Cascade deletion could not read its deployment state."
+        return 0
+    fi
     clear_screen
     menu_heading "Deleting VPN server:"
     echo
     printf '%s\n' "Deleting the Cascade egress and ingress VPS nodes."
     echo
-    if ! remove_remote_node "$egress_node" || ! remove_remote_node "$ingress_node"; then
+    if ! remove_remote_node "$egress_node" "$cascade_extra" egress || \
+        ! remove_remote_node "$ingress_node" "$cascade_extra" ingress; then
+        rm -f "$state_file" "$cascade_extra"
         show_result_screen "Cascade deletion did not complete. The Vault was not changed."
         return 0
     fi
+    rm -f "$state_file" "$cascade_extra"
     if state_mutate remove-cascade "$deployment_id"; then
         pipeline_complete "Cascade and both VPS nodes were deleted." 1
         return "$NODE_REMOVED_STATUS"
@@ -253,7 +580,8 @@ manage_cascade_server() {
         menu_option 6 "Rotate SSH key"
         menu_option 7 "Manage routing rules"
         menu_option 8 "Update Cascade"
-        menu_option 9 "Delete VPN server"
+        menu_option 9 "Replace VPS node"
+        menu_option 10 "Delete VPN server"
         echo
         if ! prompt_nav; then continue; fi
         case "$REPLY" in
@@ -285,6 +613,9 @@ manage_cascade_server() {
                 if update_cascade "$deployment_id"; then :; else pause_result_screen; fi
                 ;;
             9)
+                replace_cascade_node_menu "$deployment_id"
+                ;;
+            10)
                 remove_cascade "$deployment_id" || removal_status=$?
                 removal_status="${removal_status:-0}"
                 if ((removal_status == NODE_REMOVED_STATUS)); then
@@ -292,7 +623,7 @@ manage_cascade_server() {
                 fi
                 return
                 ;;
-            i) show_info server ;;
+            i) show_info cascade-server ;;
             b) return ;;
             m) MAIN_MENU_REQUESTED=1; return ;;
             x) exit_tui ;;
@@ -319,7 +650,7 @@ manage_cascade() {
                 ingress_node="$(cascade_node "$deployment_id" ingress)"
                 manage_keys "$ingress_node"
                 ;;
-            i) show_info status ;;
+            i) show_info cascade-server ;;
             b) return ;;
             m) MAIN_MENU_REQUESTED=1; return ;;
             x) exit_tui ;;
@@ -337,9 +668,9 @@ open_node_ssh_session() {
         return 1
     fi
     host="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["host"])' "$node" <"$state")"
-    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_user"])' "$node" <"$state")"
-    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_port"])' "$node" <"$state")"
-    private_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_private_key"], end="")' "$node" <"$state")"
+    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["user"])' "$node" <"$state")"
+    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["port"])' "$node" <"$state")"
+    private_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["private_key"], end="")' "$node" <"$state")"
     known_hosts_file="$(mktemp /tmp/xray-known-hosts.XXXXXX)"
     if ! write_node_known_hosts "$state" "$node" "$known_hosts_file"; then
         rm -f "$state" "$known_hosts_file"
@@ -389,12 +720,19 @@ open_node_ssh_session() {
     return 0
 }
 manage_node() {
-    local node="$1" node_status
+    local node="$1" node_status state access_transport
     while true; do
         clear_screen
         echo
         show_node_status "$node"
         echo
+        state="$(mktemp "$RUNTIME_TMP_DIR/.node-menu.XXXXXX")"
+        if ! read_vault_state "$state"; then
+            rm -f "$state"
+            return 1
+        fi
+        access_transport="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["access"].get("transport", "xray-reality"), end="")' "$node" <"$state")"
+        rm -f "$state"
         menu_option 1 "Manage VPN server"
         menu_option 2 "Manage access keys"
         echo
@@ -411,7 +749,14 @@ manage_node() {
                 fi
                 [[ "$MAIN_MENU_REQUESTED" == 1 ]] && return
                 ;;
-            2) manage_keys "$node"; [[ "$MAIN_MENU_REQUESTED" == 1 ]] && return ;;
+            2)
+                if [[ "$access_transport" == ssh-proxy ]]; then
+                    manage_ssh_proxy "$node" || true
+                else
+                    manage_keys "$node"
+                fi
+                [[ "$MAIN_MENU_REQUESTED" == 1 ]] && return
+                ;;
             i) show_info status ;;
             b) return ;;
             m) MAIN_MENU_REQUESTED=1; return ;;
@@ -473,16 +818,16 @@ manage_server() {
 }
 
 remove_remote_node() {
-    local node="$1"
+    local node="$1" extra_source="${2:-}" topology_role="${3:-}"
     # Removal remains independent of the pinned management host key.
-    if run_remove_with_management_key "$node"; then
+    if run_remove_with_management_key "$node" "$extra_source" "$topology_role"; then
         # The deploy user cannot remove itself while it is the Ansible user.
         # The first pass restores the original SSH access; the second pass
         # removes the deploy account and the remaining Nitka state as root.
-        run_remove_with_bootstrap "$node"
+        run_remove_with_bootstrap "$node" "$extra_source" "$topology_role"
         return $?
     fi
-    run_remove_with_bootstrap "$node"
+    run_remove_with_bootstrap "$node" "$extra_source" "$topology_role"
 }
 
 remove_node() {
@@ -514,8 +859,8 @@ remove_node() {
     state="$(mktemp)"
     if read_vault_state "$state"; then
         host="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["host"])' "$node" <"$state")"
-        management_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_port"])' "$node" <"$state")"
-        bootstrap_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["bootstrap_ssh_port"])' "$node" <"$state")"
+        management_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["port"])' "$node" <"$state")"
+        bootstrap_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["bootstrap"]["port"])' "$node" <"$state")"
     fi
     rm -f "$state"
 

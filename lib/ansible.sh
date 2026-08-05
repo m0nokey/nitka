@@ -6,7 +6,7 @@ yaml_scalar() {
 
 probe_vps_resources() {
     local host="$1" user="$2" port="$3" password="$4"
-    local inventory_dir inventory log password_yaml facts_line auth_output auth_rc preflight_pid preflight_rc=0
+    local inventory_dir inventory log password_yaml facts_line auth_output auth_rc ansible_output preflight_pid preflight_rc=0 pipeline_owned=0
     inventory_dir="$(mktemp -d /tmp/xray-preflight.XXXXXX)"
     inventory="$inventory_dir/hosts.yml"
     log="$inventory_dir/ansible.log"
@@ -28,6 +28,9 @@ probe_vps_resources() {
 
     if ((PIPELINE_ACTIVE)); then
         pipeline_stage 10 'Checking the VPS connection'
+    else
+        pipeline_start "Checking VPS resources" preflight
+        pipeline_owned=1
     fi
     # Reject bad credentials before Ansible starts its retry loop.
     if command -v sshpass >/dev/null 2>&1; then
@@ -45,11 +48,13 @@ probe_vps_resources() {
             "$user@$host" true 2>&1)" || auth_rc=$?
         if ((auth_rc != 0)); then
             if grep -Eiq 'permission denied|authentication failed|authentication refused' <<<"$auth_output"; then
+                ((pipeline_owned)) && pipeline_abort
                 rm -rf "$inventory_dir"
                 unset password password_yaml auth_output
                 return "$INVALID_BOOTSTRAP_CREDENTIALS"
             fi
             if grep -Eiq 'connection closed|connection timed out|timed out|connection refused|no route to host|network is unreachable|could not resolve hostname' <<<"$auth_output"; then
+                ((pipeline_owned)) && pipeline_abort
                 rm -rf "$inventory_dir"
                 unset password password_yaml auth_output
                 return "$UNAVAILABLE_BOOTSTRAP_CONNECTION"
@@ -58,34 +63,39 @@ probe_vps_resources() {
     fi
     unset password password_yaml
 
-    if ((PIPELINE_ACTIVE)); then
-        pipeline_stage 20 'Checking VPS resources'
+    if ((DEBUG_MODE)); then
+        if ansible_output="$(set -o pipefail; ansible-playbook -i "$inventory" "$ROOT_DIR/ansible/playbooks/preflight.yml" 2>&1 | tee /dev/stderr)"; then
+            preflight_rc=0
+        else
+            preflight_rc=$?
+        fi
     else
-        clear_screen
-        printf '%s\n' "Checking VPS resources..."
+        ansible-playbook -i "$inventory" "$ROOT_DIR/ansible/playbooks/preflight.yml" >"$log" 2>&1 &
+        preflight_pid=$!
+        while kill -0 "$preflight_pid" 2>/dev/null; do
+            pipeline_stage_from_ansible_log "$log"
+            pipeline_render
+            sleep 0.1
+        done
+        wait "$preflight_pid" || preflight_rc=$?
+        ansible_output="$(cat "$log")"
     fi
-    ansible-playbook -i "$inventory" "$ROOT_DIR/ansible/preflight.yml" >"$log" 2>&1 &
-    preflight_pid=$!
-    while kill -0 "$preflight_pid" 2>/dev/null; do
-        pipeline_stage_from_ansible_log "$log"
-        pipeline_render
-        sleep 0.1
-    done
-    wait "$preflight_pid" || preflight_rc=$?
     if ((preflight_rc != 0)); then
-        if grep -Eiq 'permission denied|authentication failed|authentication refused|failed password' "$log"; then
+        ((pipeline_owned)) && pipeline_abort
+        if grep -Eiq 'permission denied|authentication failed|authentication refused|failed password' <<<"$ansible_output"; then
             rm -rf "$inventory_dir"
             return "$INVALID_BOOTSTRAP_CREDENTIALS"
         fi
-        if grep -Eiq 'connection closed|connection timed out|timed out waiting|connection refused|no route to host|network is unreachable|could not resolve hostname' "$log"; then
+        if grep -Eiq 'connection closed|connection timed out|timed out waiting|connection refused|no route to host|network is unreachable|could not resolve hostname' <<<"$ansible_output"; then
             rm -rf "$inventory_dir"
             return "$UNAVAILABLE_BOOTSTRAP_CONNECTION"
         fi
         rm -rf "$inventory_dir"
         return "$BOOTSTRAP_PREFLIGHT_FAILED"
     fi
-    facts_line="$(grep -o 'XRAY_RESOURCE_FACTS vcpus=[0-9][0-9]* ram_mb=[0-9][0-9]*' "$log" | tail -n 1 || true)"
+    facts_line="$(grep -o 'XRAY_RESOURCE_FACTS vcpus=[0-9][0-9]* ram_mb=[0-9][0-9]*' <<<"$ansible_output" | tail -n 1 || true)"
     if [[ ! "$facts_line" =~ vcpus=([0-9]+)[[:space:]]ram_mb=([0-9]+) ]]; then
+        ((pipeline_owned)) && pipeline_abort
         rm -rf "$inventory_dir"
         return "$BOOTSTRAP_PREFLIGHT_FAILED"
     fi
@@ -95,12 +105,13 @@ probe_vps_resources() {
     # shellcheck disable=SC2034
     VPS_RAM_MB="${BASH_REMATCH[2]}"
     rm -rf "$inventory_dir"
+    ((pipeline_owned)) && pipeline_complete "VPS resources available"
     return 0
 }
 
 probe_vps_resources_with_key() {
     local host="$1" user="$2" port="$3" private_key="$4" known_hosts_file="${5:-}"
-    local inventory_dir inventory key_file log facts_line ssh_common_args preflight_pid preflight_rc=0 pipeline_owned=0
+    local inventory_dir inventory key_file log facts_line ansible_output ssh_common_args preflight_pid preflight_rc=0 pipeline_owned=0
     inventory_dir="$(mktemp -d /tmp/xray-preflight.XXXXXX)"
     inventory="$inventory_dir/hosts.yml"
     key_file="$inventory_dir/id_ed25519"
@@ -127,17 +138,18 @@ probe_vps_resources_with_key() {
         >"$inventory"
     chmod 600 "$inventory"
 
-    if ((DEBUG_MODE)); then
-        if ansible-playbook -i "$inventory" "$ROOT_DIR/ansible/preflight.yml" 2>&1 | tee "$log"; then
-            preflight_rc=0
-        else
-            preflight_rc="${PIPESTATUS[0]}"
-        fi
-    else
+    if ((PIPELINE_ACTIVE == 0)); then
         pipeline_start "Checking VPN server resources" preflight
         pipeline_owned=1
-        pipeline_stage 20 'Checking VPS resources'
-        ansible-playbook -i "$inventory" "$ROOT_DIR/ansible/preflight.yml" >"$log" 2>&1 &
+    fi
+    if ((DEBUG_MODE)); then
+        if ansible_output="$(set -o pipefail; ansible-playbook -i "$inventory" "$ROOT_DIR/ansible/playbooks/preflight.yml" 2>&1 | tee /dev/stderr)"; then
+            preflight_rc=0
+        else
+            preflight_rc=$?
+        fi
+    else
+        ansible-playbook -i "$inventory" "$ROOT_DIR/ansible/playbooks/preflight.yml" >"$log" 2>&1 &
         preflight_pid=$!
         while kill -0 "$preflight_pid" 2>/dev/null; do
             pipeline_stage_from_ansible_log "$log"
@@ -145,6 +157,7 @@ probe_vps_resources_with_key() {
             sleep 0.1
         done
         wait "$preflight_pid" || preflight_rc=$?
+        ansible_output="$(cat "$log")"
     fi
     if ((preflight_rc != 0)); then
         ((pipeline_owned)) && pipeline_abort
@@ -156,14 +169,11 @@ probe_vps_resources_with_key() {
         wait_action_return
         return 1
     fi
-    facts_line="$(grep -o 'XRAY_RESOURCE_FACTS vcpus=[0-9][0-9]* ram_mb=[0-9][0-9]*' "$log" | tail -n 1 || true)"
+    facts_line="$(grep -o 'XRAY_RESOURCE_FACTS vcpus=[0-9][0-9]* ram_mb=[0-9][0-9]*' <<<"$ansible_output" | tail -n 1 || true)"
     if [[ ! "$facts_line" =~ vcpus=([0-9]+)[[:space:]]ram_mb=([0-9]+) ]]; then
         ((pipeline_owned)) && pipeline_abort
         rm -rf "$inventory_dir"
         printf '%s\n' "The VPS resource report was invalid. The DNS profile was not changed."
-        if ((DEBUG_MODE)); then
-            printf '%s\n' "The raw Ansible output is shown above."
-        fi
         wait_action_return
         return 1
     fi
@@ -238,17 +248,41 @@ run_ansible_playbook() {
     return "$rc"
 }
 
+probe_ssh_endpoint() {
+    local host="$1" user="$2" port="$3" key_file="$4" known_hosts_file="$5"
+    [[ -n "$host" && -n "$user" && -n "$port" && -s "$key_file" ]] || return 1
+    ssh -i "$key_file" \
+        -p "$port" \
+        -o IdentitiesOnly=yes \
+        -o BatchMode=yes \
+        -o ConnectTimeout=8 \
+        -o StrictHostKeyChecking=yes \
+        -o UserKnownHostsFile="$known_hosts_file" \
+        -o LogLevel=ERROR \
+        "$user@$host" true >/dev/null 2>&1
+}
+
 write_node_known_hosts() {
     local state_file="$1" node="$2" output="$3" port_override="${4:-}" host port public_key
     host="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["host"])' "$node" <"$state_file")"
-    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_port"])' "$node" <"$state_file")"
+    port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["port"])' "$node" <"$state_file")"
     if [[ -n "$port_override" ]]; then
         port="$port_override"
     fi
-    public_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]].get("ssh_host_public_key", ""), end="")' "$node" <"$state_file")"
+    public_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"].get("host_public_key", ""), end="")' "$node" <"$state_file")"
     [[ -n "$host" && -n "$port" && -n "$public_key" ]] || return 1
-    printf '[%s]:%s %s\n' "$host" "$port" "$public_key" >"$output"
+    if [[ "$port" == 22 ]]; then
+        printf '%s %s\n' "$host" "$public_key" >"$output"
+    else
+        printf '[%s]:%s %s\n' "$host" "$port" "$public_key" >"$output"
+    fi
     chmod 600 "$output"
+}
+
+scan_ssh_ed25519_host_key() {
+    local host="$1" port="$2"
+    ssh-keyscan -T 8 -p "$port" "$host" 2>/dev/null \
+        | sed -nE '/^[^[:space:]]+[[:space:]]+ssh-ed25519[[:space:]]+/ { s/^[^[:space:]]+[[:space:]]+(ssh-ed25519[[:space:]]+[^[:space:]]+).*/\1/; p; q; }'
 }
 
 find_node_by_connection() {
@@ -262,11 +296,11 @@ host, port = sys.argv[2:]
 for name, node in state.get("nodes", {}).items():
     saved_host = str(node.get("host", ""))
     saved_ports = {
-        str(node["management_port"]),
-        str(node.get("ssh_port", "")),
-        str(node.get("bootstrap_ssh_port", "")),
+        str(node["management"]["port"]),
+        str(node["management"].get("sshd_port", "")),
+        str(node["bootstrap"].get("port", "")),
     }
-    if not node.get("bootstrap_ssh_port"):
+    if not node["bootstrap"].get("port"):
         saved_ports.add("22")
     if saved_host == host and port in saved_ports:
         print(name)
@@ -281,7 +315,7 @@ retry_existing_node_with_bootstrap() {
     clear_screen
     printf '%s\n' "Ansible will verify the VPS address, SSH port, user, and password."
     echo
-    saved_password="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]].get("bootstrap_password", ""), end="")' "$node" <"$state_file")"
+    saved_password="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["bootstrap"].get("password", ""), end="")' "$node" <"$state_file")"
     if [[ "$use_saved_password" == 1 && -n "$saved_password" ]]; then
         password="$saved_password"
         printf '%s\n' "Using the encrypted initial SSH password from the Vault."
@@ -293,7 +327,7 @@ retry_existing_node_with_bootstrap() {
         password="$REPLY"
     fi
     retry_state="$(mktemp "$RUNTIME_TMP_DIR/.retry.XXXXXX")"
-    if ! XRAY_BOOTSTRAP_PASSWORD="$password" python3 "$ROOT_DIR/scripts/state_cli.py" set-bootstrap "$node" "$user" "$port" <"$state_file" >"$retry_state"; then
+    if ! NITKA_BOOTSTRAP_PASSWORD="$password" python3 "$ROOT_DIR/scripts/state_cli.py" set-bootstrap "$node" "$user" "$port" <"$state_file" >"$retry_state"; then
         unset password
         rm -f "$retry_state"
         return 1
@@ -319,10 +353,10 @@ retry_existing_node_with_saved_key() {
         return 1
     fi
     host="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["host"])' "$node" <"$recovery_state")"
-    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_user"])' "$node" <"$recovery_state")"
-    target_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["ssh_port"])' "$node" <"$recovery_state")"
-    management_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_port"])' "$node" <"$recovery_state")"
-    bootstrap_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["bootstrap_ssh_port"])' "$node" <"$recovery_state")"
+    user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["user"])' "$node" <"$recovery_state")"
+    target_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["sshd_port"])' "$node" <"$recovery_state")"
+    management_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["port"])' "$node" <"$recovery_state")"
+    bootstrap_port="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["bootstrap"]["port"])' "$node" <"$recovery_state")"
     key_file="$(mktemp "$RUNTIME_TMP_DIR/.probe.XXXXXX")"
     known_hosts_file="$(mktemp /tmp/xray-known-hosts.XXXXXX)"
     probe_known_hosts="$(mktemp /tmp/xray-known-hosts.XXXXXX)"
@@ -336,7 +370,7 @@ retry_existing_node_with_saved_key() {
         cat "$probe_known_hosts" >>"$known_hosts_file"
     done
     rm -f "$probe_known_hosts"
-    python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management_private_key"], end="")' "$node" <"$recovery_state" >"$key_file"
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["nodes"][sys.argv[1]]["management"]["private_key"], end="")' "$node" <"$recovery_state" >"$key_file"
     chmod 600 "$key_file"
 
     if [[ ! -s "$key_file" ]]; then

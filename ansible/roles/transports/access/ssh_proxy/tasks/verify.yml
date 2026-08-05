@@ -1,0 +1,14 @@
+---
+- name: Verify standalone SSH proxy container
+  community.docker.docker_container_info:
+    name: "{{ access_ssh_proxy_container_name }}"
+  register: access_ssh_proxy_verify_container
+  changed_when: false
+- name: Require a healthy standalone SSH proxy container
+  ansible.builtin.assert:
+    that:
+      - access_ssh_proxy_verify_container.exists | bool
+      - access_ssh_proxy_verify_container.container.State.Running | default(false) | bool
+      - access_ssh_proxy_verify_container.container.State.Health.Status | default('') == 'healthy'
+    fail_msg: >-
+      The SSH proxy adapter did not report a healthy container.

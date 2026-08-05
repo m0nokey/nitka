@@ -26,7 +26,7 @@ mutate_access_keys_and_deploy() {
             printf '%s\n' "Access key change failed. The existing Vault was not changed."
             return 1
         fi
-    elif ! run_node_playbook "$node" site.yml "$after" "Updating access keys" access_keys; then
+    elif ! run_node_playbook "$node" manage_access.yml "$after" "Updating access keys" access_keys; then
         rm -f "$before" "$after"
         printf '%s\n' "Access key change failed. The existing Vault was not changed."
         return 1
@@ -36,7 +36,7 @@ mutate_access_keys_and_deploy() {
         if [[ -n "$cascade_id" ]]; then
             run_cascade_ingress_playbook "$cascade_id" "$before" "Rolling back access key change" access_keys_rollback || rollback_rc=1
         else
-            run_node_playbook "$node" site.yml "$before" "Rolling back access key change" access_keys_rollback || rollback_rc=1
+            run_node_playbook "$node" manage_access.yml "$before" "Rolling back access key change" access_keys_rollback rollback_update || rollback_rc=1
         fi
         rm -f "$before" "$after"
         pipeline_abort
@@ -130,7 +130,7 @@ import sys
 node = json.load(open(sys.argv[2], encoding="utf-8")).get("nodes", {}).get(sys.argv[1])
 if node is None:
     raise SystemExit("node not found")
-for index, key in enumerate(node.get("xray", {}).get("access_keys", []), 1):
+for index, key in enumerate(node.get("access", {}).get("xray_reality", {}).get("access_keys", []), 1):
     print(f"{index}\t{key['key_id']}\t{key['vision_uuid']}\t{key['xhttp_uuid']}")
 PY
 )"
@@ -139,7 +139,10 @@ PY
             remove_all_selection=1
             printf '%s\n' "No access keys configured."
         else
-            key_count="$(printf '%s\n' "$key_list" | awk 'END {print NR}')"
+            key_count=0
+            while IFS= read -r _; do
+                key_count=$((key_count + 1))
+            done <<<"$key_list"
             remove_all_selection=$((key_count + 1))
             while IFS=$'\t' read -r selection key_id vision_id xhttp_id; do
                 printf '%s%s.%s %sKey id:%s %s\n' "$COLOR_LINE" "$selection" "$COLOR_RESET" "$COLOR_TEXT" "$COLOR_RESET" "$key_id"
@@ -206,7 +209,7 @@ import sys
 
 node = json.load(open(sys.argv[3], encoding="utf-8")).get("nodes", {}).get(sys.argv[1])
 index = int(sys.argv[2])
-keys = node.get("xray", {}).get("access_keys", []) if node else []
+keys = node.get("access", {}).get("xray_reality", {}).get("access_keys", []) if node else []
 if 1 <= index <= len(keys):
     key = keys[index - 1]
     print(f"{key['key_id']}\t{key['vision_uuid']}\t{key['xhttp_uuid']}")

@@ -1,0 +1,13 @@
+---
+- name: Verify SSH TUN endpoint container
+  community.docker.docker_container_info:
+    name: "{{ backhaul_ssh_tun_container_name }}"
+  register: backhaul_ssh_tun_verify_container
+  changed_when: false
+- name: Require a healthy SSH TUN endpoint container
+  ansible.builtin.assert:
+    that:
+      - backhaul_ssh_tun_verify_container.exists | bool
+      - backhaul_ssh_tun_verify_container.container.State.Running | default(false) | bool
+      - backhaul_ssh_tun_verify_container.container.State.Health.Status | default('') == 'healthy'
+    fail_msg: The SSH TUN adapter did not report a healthy endpoint container.

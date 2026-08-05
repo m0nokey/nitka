@@ -1,0 +1,32 @@
+---
+- name: >-
+    Deploy {{ 'SSH proxy' if (access_transport_selection | default('xray-reality')) == 'ssh-proxy'
+    else 'Xray REALITY' }}
+  hosts: xray_nodes
+  become: true
+  gather_facts: false
+  force_handlers: true
+  vars:
+    access_xray_dir: /opt/nitka/standalone/access/xray-reality
+    access_xray_compose_path: "{{ access_xray_dir }}/compose.yml"
+  pre_tasks:
+    - name: Wait for initial SSH access
+      ansible.builtin.wait_for_connection:
+        delay: 2
+        timeout: 30
+        sleep: 2
+    - name: Gather VPS facts after SSH is available
+      ansible.builtin.setup:
+  roles:
+    - role: system_base
+      vars:
+        system_base_enable_docker_updater: >-
+          {{ (access_transport_selection | default('xray-reality')) != 'ssh-proxy' }}
+        system_base_docker_updater_compose_file: >-
+          {{ access_xray_compose_path
+             if (access_transport_selection | default('xray-reality')) != 'ssh-proxy'
+             else '' }}
+    - role: transports/access  # noqa role-name[path]
+      vars:
+        access_topology_selection: standalone
+        access_transport_operation: deploy

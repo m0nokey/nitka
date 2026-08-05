@@ -27,9 +27,12 @@ backhaul:
   transport: ssh-tun
 ```
 
-The client-side public example is deliberately separate from this tree. The
-only documented client is Shadowrocket for iOS/macOS; the server access
-adapter remains Xray REALITY.
+The client-side public examples are deliberately separate from this tree.
+Supported access adapters are Xray REALITY and the standalone SSH dynamic
+proxy. Shadowrocket can use the SSH adapter with public-key authentication.
 
 Future adapters are added as parallel directories. They must implement the
-same contract before they can be selected by deployment state.
+same contract before they can be selected by deployment state. A transport
+migration is separate from node replacement: it validates the new access and
+backhaul pair, deploys both endpoints, runs healthchecks, and writes the new
+pair to the Vault only after the cutover succeeds.

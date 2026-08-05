@@ -1,0 +1,33 @@
+---
+- name: Check standalone Xray Compose file before removal
+  ansible.builtin.stat:
+    path: "{{ access_xray_compose_path }}"
+  register: access_xray_remove_compose
+  when: access_xray_topology | default('standalone') == 'standalone'
+- name: Remove standalone Xray Compose project
+  community.docker.docker_compose_v2:
+    project_src: "{{ access_xray_dir }}"
+    files:
+      - compose.yml
+    state: absent
+    remove_orphans: true
+    remove_images: all
+    remove_volumes: true
+  when:
+    - access_xray_topology | default('standalone') == 'standalone'
+    - access_xray_remove_compose.stat.exists
+- name: Remove standalone Xray application directory
+  ansible.builtin.file:
+    path: "{{ access_xray_dir }}"
+    state: absent
+  when: access_xray_topology | default('standalone') == 'standalone'
+- name: Remove Xray migration source directory
+  ansible.builtin.file:
+    path: "{{ access_xray_migration_source_dir }}"
+    state: absent
+  when: access_xray_topology | default('standalone') == 'standalone'
+- name: Remove Cascade Xray application
+  ansible.builtin.include_role:
+    name: topology/cascade/ingress  # noqa role-name[path]
+    tasks_from: remove
+  when: access_xray_topology | default('standalone') == 'cascade'

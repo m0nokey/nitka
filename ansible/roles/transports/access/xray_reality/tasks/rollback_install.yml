@@ -1,0 +1,9 @@
+---
+- name: Roll back standalone Xray installation
+  ansible.builtin.include_tasks: remove.yml
+  when: access_xray_topology | default('standalone') == 'standalone'
+- name: Roll back Cascade Xray installation
+  ansible.builtin.include_role:
+    name: topology/cascade/ingress  # noqa role-name[path]
+    tasks_from: remove
+  when: access_xray_topology | default('standalone') == 'cascade'

@@ -1,0 +1,174 @@
+---
+- name: Prepare local SSH TUN key directory
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ backhaul_ssh_tun_ssh_key_dir }}"
+    state: directory
+    mode: "0700"
+  changed_when: false
+
+- name: Restore imported SSH TUN authentication private key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.copy:
+    content: "{{ backhaul_ssh_tun_auth_private_key }}\n"
+    dest: "{{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519"
+    mode: "0600"
+  no_log: true
+  when:
+    - backhaul_ssh_tun_auth_private_key is defined
+    - backhaul_ssh_tun_auth_private_key | length > 0
+
+- name: Restore imported SSH TUN authentication public key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.copy:
+    content: "{{ backhaul_ssh_tun_auth_public_key }}\n"
+    dest: "{{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519.pub"
+    mode: "0644"
+  no_log: true
+  when:
+    - backhaul_ssh_tun_auth_public_key is defined
+    - backhaul_ssh_tun_auth_public_key | length > 0
+
+- name: Generate SSH TUN keypair on first run
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N '' -f {{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519
+      -C cascade-ssh-tun
+    creates: "{{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519"
+  when:
+    - backhaul_ssh_tun_auth_private_key is not defined or backhaul_ssh_tun_auth_private_key | length == 0
+
+- name: Derive SSH TUN authentication public key when absent
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell:
+    cmd: >-
+      ssh-keygen -y -f {{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519
+      > {{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519.pub
+  args:
+    creates: "{{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519.pub"
+  no_log: true
+
+- name: Generate SSH TUN server host key on first run
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N '' -f {{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key
+      -C cascade-ssh-tun-server
+    creates: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key"
+  when:
+    - backhaul_ssh_tun_endpoint == 'server'
+    - backhaul_ssh_tun_host_private_key is not defined or backhaul_ssh_tun_host_private_key | length == 0
+
+- name: Restore imported SSH TUN server host private key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.copy:
+    content: "{{ backhaul_ssh_tun_host_private_key }}\n"
+    dest: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key"
+    mode: "0600"
+  no_log: true
+  when:
+    - backhaul_ssh_tun_endpoint == 'server'
+    - backhaul_ssh_tun_host_private_key is defined
+    - backhaul_ssh_tun_host_private_key | length > 0
+
+- name: Restore imported SSH TUN server host public key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.copy:
+    content: "{{ backhaul_ssh_tun_host_public_key }}\n"
+    dest: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key.pub"
+    mode: "0644"
+  no_log: true
+  when:
+    - backhaul_ssh_tun_endpoint == 'server'
+    - backhaul_ssh_tun_host_public_key is defined
+    - backhaul_ssh_tun_host_public_key | length > 0
+
+- name: Check SSH TUN server host private key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.stat:
+    path: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key"
+  register: backhaul_ssh_tun_host_private_key_stat
+
+- name: Check SSH TUN server host public key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.stat:
+    path: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key.pub"
+  register: backhaul_ssh_tun_host_public_key_stat
+
+- name: Derive SSH TUN server host public key when absent
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.shell:
+    cmd: >-
+      ssh-keygen -y -f {{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key
+      > {{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key.pub
+  args:
+    creates: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key.pub"
+  no_log: true
+  when: backhaul_ssh_tun_endpoint == 'server'
+
+- name: Derive canonical SSH TUN server host public key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -y -f {{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key
+  register: backhaul_ssh_tun_derived_host_public_key
+  changed_when: false
+  no_log: true
+  when:
+    - backhaul_ssh_tun_endpoint == 'server'
+    - backhaul_ssh_tun_host_private_key_stat.stat.exists
+
+- name: Synchronize SSH TUN server host public key with its private key
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.copy:
+    content: "{{ backhaul_ssh_tun_derived_host_public_key.stdout | trim }}\n"
+    dest: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key.pub"
+    mode: "0644"
+  no_log: true
+  when:
+    - backhaul_ssh_tun_endpoint == 'server'
+    - backhaul_ssh_tun_host_private_key_stat.stat.exists
+
+- name: Set SSH TUN private key permissions
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519"
+    mode: "0600"
+
+- name: Set SSH TUN public key permissions
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ backhaul_ssh_tun_ssh_key_dir }}/id_ed25519.pub"
+    mode: "0644"
+
+- name: Set SSH TUN server host private key permissions
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key"
+    mode: "0600"
+  when: backhaul_ssh_tun_host_private_key_stat.stat.exists
+
+- name: Set SSH TUN server host public key permissions
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.file:
+    path: "{{ backhaul_ssh_tun_ssh_key_dir }}/ssh_host_ed25519_key.pub"
+    mode: "0644"
+  when: backhaul_ssh_tun_host_public_key_stat.stat.exists

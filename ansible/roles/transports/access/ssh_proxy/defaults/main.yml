@@ -1,0 +1,16 @@
+---
+access_ssh_proxy_dir: /opt/nitka/standalone/access/ssh-proxy
+access_ssh_proxy_migration_source_dir: /opt/nitka/ssh-transport
+access_ssh_proxy_compose_path: "{{ access_ssh_proxy_dir }}/compose.yml"
+access_ssh_proxy_service_name: nitka-ssh-transport
+access_ssh_proxy_container_name: nitka-ssh-transport
+access_ssh_proxy_image: local/nitka-ssh-transport:latest
+access_ssh_proxy_group: proxy
+access_ssh_proxy_internal_port: 2222
+access_ssh_proxy_external_port: 0
+access_ssh_proxy_access_keys: []
+access_ssh_proxy_host_key_volume: nitka_ssh_transport_host_keys
+access_ssh_proxy_kex_algorithms: >-
+  curve25519-sha256,curve25519-sha256@libssh.org,
+  mlkem768x25519-sha256,sntrup761x25519-sha512,
+  sntrup761x25519-sha512@openssh.com

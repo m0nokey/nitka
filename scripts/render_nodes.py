@@ -9,6 +9,11 @@ import sys
 import tempfile
 from datetime import datetime
 
+try:
+    from scripts.table import column_widths, format_row
+except ModuleNotFoundError:
+    from table import column_widths, format_row
+
 RESET = "\033[0m"
 BLUE = "\033[38;5;117m"
 GRAY = "\033[38;5;245m"
@@ -42,10 +47,12 @@ def port_open(host, port, timeout=1.0):
 def management_ports(node):
     """Return the SSH ports used during bootstrap and normal management."""
     ports = []
+    management = node.get("management", {})
+    bootstrap = node.get("bootstrap", {})
     for value in (
-        node.get("management_port"),
-        node.get("ssh_port"),
-        node.get("bootstrap_ssh_port"),
+        management.get("port"),
+        management.get("sshd_port"),
+        bootstrap.get("port"),
     ):
         try:
             port = int(value)
@@ -58,7 +65,9 @@ def management_ports(node):
 
 def service_containers(node):
     """Return container names used by the selected node's deployment."""
-    role = node.get("role")
+    if node.get("access", {}).get("transport") == "ssh-proxy":
+        return ("nitka-ssh-transport", "ssh-transport")
+    role = node.get("topology", {}).get("role")
     if role == "ingress":
         return (
             "cascade-xray",
@@ -79,7 +88,9 @@ def service_containers(node):
 
 
 def service_probe_command(node):
-    if node.get("role") == "egress":
+    if node.get("access", {}).get("transport") == "ssh-proxy":
+        case_clause = "*ssh*transport*|*nitka-ssh*"
+    elif node.get("topology", {}).get("role") == "egress":
         case_clause = "*ssh*tun*|*ssh_tun*|*tun*ssh*"
     else:
         case_clause = "*xray*"
@@ -107,13 +118,14 @@ def service_probe_command(node):
 def management_state(node, timeout=5.0):
     """Probe management access and return details without exposing credentials."""
     host = node.get("host", "")
-    user = node["management_user"]
-    private_key = node["management_private_key"]
-    host_public_key = node.get("ssh_host_public_key", "")
+    management = node["management"]
+    user = management["user"]
+    private_key = management["private_key"]
+    host_public_key = management.get("host_public_key", "")
     ports = management_ports(node)
     details = {
         "ports": ports,
-        "management_port": node["management_port"],
+        "management_port": management["port"],
         "tcp_ports": [],
         "ssh_port": None,
         "ssh": "not checked",
@@ -207,10 +219,10 @@ def management_state(node, timeout=5.0):
                     )
                 else:
                     details["service"] = "service-command-failed"
-                details["xray"] = (
+                details["access_service"] = (
                     "xray-running"
                     if details["service"] == "service-running"
-                    and node.get("role") != "egress"
+                    and node.get("topology", {}).get("role") != "egress"
                     else details["service"]
                 )
                 return details
@@ -247,8 +259,11 @@ def management_state(node, timeout=5.0):
 
 def node_diagnostics(node):
     host = node.get("host", "")
-    xray = node.get("xray", {})
-    vpn_ports = (xray.get("vision_port"), xray.get("xhttp_port"))
+    xray = node.get("access", {}).get("xray_reality", {})
+    if node.get("access", {}).get("transport") == "ssh-proxy":
+        vpn_ports = (node.get("access", {}).get("ssh_proxy", {}).get("port"),)
+    else:
+        vpn_ports = (xray.get("vision_port"), xray.get("xhttp_port"))
     ports = [port for port in vpn_ports if port]
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures = [pool.submit(port_open, host, port) for port in ports]
@@ -258,8 +273,25 @@ def node_diagnostics(node):
 
     ssh_reachable = bool(management["tcp_ports"] or management["ssh_port"])
     service_running = management.get("service") == "service-running" or (
-        management.get("xray") == "xray-running"
+        management.get("access_service") == "xray-running"
     )
+
+    if node.get("access", {}).get("transport") == "ssh-proxy":
+        proxy_reachable = bool(probes) and all(probes)
+        management_reachable = bool(management.get("ssh") == "connected")
+        if not management_reachable and not proxy_reachable:
+            status = "Unreachable"
+        elif management_reachable and service_running and proxy_reachable:
+            status = "Active"
+        elif management_reachable or proxy_reachable:
+            status = "Partial"
+        else:
+            status = "VPN unavailable"
+        return {
+            "status": status,
+            "management": management,
+            "vpn": list(zip(ports, probes)),
+        }
 
     if not ssh_reachable and not any(probes):
         status = "Unreachable"
@@ -279,55 +311,6 @@ def node_diagnostics(node):
         "management": management,
         "vpn": list(zip(ports, probes)),
     }
-
-
-def endpoint_label(node, port):
-    xray = node.get("xray", {})
-    if port == xray.get("vision_port"):
-        return "VLESS TCP Vision + REALITY"
-    if port == xray.get("xhttp_port"):
-        return "VLESS XHTTP + REALITY packet-up"
-    return "VPN endpoint"
-
-
-def connectivity_lines(node, diagnostics):
-    management = diagnostics["management"]
-    ssh_port = management.get("ssh_port") or management.get("management_port")
-    tcp_state = (
-        "open" if ssh_port in management.get("tcp_ports", []) else "unavailable"
-    )
-    ssh_state = management.get("ssh", "not checked")
-    lines = [
-        f"    {'OpenSSH':<34}TCP {ssh_port!s:<10}{tcp_state}  SSH: {ssh_state}",
-    ]
-    for port, reachable in diagnostics["vpn"]:
-        state = "reachable" if reachable else "unavailable"
-        lines.append(f"    {endpoint_label(node, port):<34}TCP {port!s:<10}{state}")
-    return lines
-
-
-def firewall_hint(diagnostics):
-    management = diagnostics["management"]
-    vpn = diagnostics["vpn"]
-    return (
-        management.get("ssh") == "connected"
-        and management.get("xray") == "xray-running"
-        and len(vpn) == 2
-        and not any(reachable for _, reachable in vpn)
-    )
-
-
-def print_node_details(node, diagnostics):
-    print()
-    print("  Connectivity:")
-    for line in connectivity_lines(node, diagnostics):
-        print(line)
-    if firewall_hint(diagnostics):
-        ports = ", ".join(str(port) for port, _ in diagnostics["vpn"])
-        print()
-        print("  SSH is reachable and Xray is running, but both VPN ports are blocked.")
-        print("  Check the VPS provider firewall/security group.")
-        print(f"  Allow inbound TCP ports: {ports}.")
 
 
 def main():
@@ -369,15 +352,15 @@ def main():
         headers = ("IP", "STATUS", "COUNTRY", "CREATED", "PROVIDER")
         values = [(host, status, country, created, provider)
                   for host, country, created, status, provider, _ in rows]
-        widths = [max(len(headers[i]), *(len(row[i]) for row in values)) for i in range(5)]
+        widths = column_widths(headers, values)
         number_width = len(str(len(rows)))
         def row_prefix(number):
             return f"  {number:>{number_width}}.   "
-        print(color(" " * len(row_prefix(1)) + "   ".join(headers[i].ljust(widths[i]) for i in range(5)).rstrip(), BLUE))
+        print(color(format_row(headers, widths, indent=" " * len(row_prefix(1)), gap="   "), BLUE))
         print()
         for index, (host, country, created, status, provider, _) in enumerate(rows, 1):
             values = (host, status, country, created, provider)
-            row = "   ".join(values[i].ljust(widths[i]) for i in range(5)).rstrip()
+            row = format_row(values, widths, gap="   ")
             status_start = row.find(status)
             status_end = status_start + len(status)
             colored_row = (
@@ -387,8 +370,6 @@ def main():
             )
             print(row_prefix(index) + colored_row)
 
-        if args.node and args.check:
-            print_node_details(nodes[args.node], statuses[args.node])
     print()
 
 

@@ -1,0 +1,32 @@
+---
+- name: Select SSH TUN restart directory
+  ansible.builtin.set_fact:
+    backhaul_ssh_tun_restart_dir: >-
+      {{ topology_cascade_ingress_remote_dir if backhaul_ssh_tun_endpoint == 'client'
+         else topology_cascade_egress_remote_dir }}
+  changed_when: false
+
+- name: Restart SSH TUN endpoint service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ backhaul_ssh_tun_restart_dir }}/compose.yml"
+      - up
+      - --detach
+      - --force-recreate
+      - --no-deps
+      - "{{ backhaul_ssh_tun_service_name }}"
+  changed_when: true
+
+- name: Verify restarted SSH TUN endpoint service
+  community.docker.docker_container_info:
+    name: "{{ backhaul_ssh_tun_container_name }}"
+  register: backhaul_ssh_tun_restart_container_info
+  until:
+    - backhaul_ssh_tun_restart_container_info.exists | bool
+    - backhaul_ssh_tun_restart_container_info.container.State.Running | default(false) | bool
+    - backhaul_ssh_tun_restart_container_info.container.State.Health.Status | default('') == 'healthy'
+  retries: 60
+  delay: 2

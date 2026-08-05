@@ -1,0 +1,19 @@
+---
+- name: Check Cascade egress Compose file before removal
+  ansible.builtin.stat:
+    path: "{{ topology_cascade_egress_remote_dir }}/compose.yml"
+  register: topology_cascade_egress_compose_stat
+- name: Remove Cascade egress Compose project
+  community.docker.docker_compose_v2:
+    project_src: "{{ topology_cascade_egress_remote_dir }}"
+    files:
+      - compose.yml
+    state: absent
+    remove_orphans: true
+    remove_images: all
+    remove_volumes: true
+  when: topology_cascade_egress_compose_stat.stat.exists
+- name: Remove Cascade egress application directory
+  ansible.builtin.file:
+    path: "{{ topology_cascade_egress_remote_dir }}"
+    state: absent

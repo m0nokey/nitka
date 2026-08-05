@@ -8,8 +8,10 @@ from datetime import datetime
 
 try:
     from scripts.render_nodes import node_diagnostics
+    from scripts.table import column_widths, format_row
 except ModuleNotFoundError:
     from render_nodes import node_diagnostics
+    from table import column_widths, format_row
 
 
 def date_value(value):
@@ -21,7 +23,7 @@ def date_value(value):
 
 def status_for_node(node, diagnostics=None):
     if diagnostics and id(node) in diagnostics:
-        if node.get("role") == "egress":
+        if node.get("topology", {}).get("role") == "egress":
             return "Active" if diagnostics[id(node)]["management"].get("ssh") == "connected" else "Unreachable"
         return diagnostics[id(node)].get("status", "Unknown")
     return node.get("status", "Active")
@@ -30,6 +32,12 @@ def status_for_node(node, diagnostics=None):
 def deployment_status(nodes, diagnostics=None):
     statuses = [status_for_node(node, diagnostics) for node in nodes]
     return "Active" if statuses and all(item == "Active" for item in statuses) else "Partial"
+
+
+def node_mode(node):
+    if node.get("access", {}).get("transport") == "ssh-proxy":
+        return "SSH proxy"
+    return node.get("mode", "Xray")
 
 
 def fleet_items(state):
@@ -58,38 +66,34 @@ def render(state, diagnostics=None):
 
     print("Node Management:")
     print()
-    print(
-        f"{'':<5}{'IP':<15} {'STATUS':<8} {'COUNTRY':<9} "
-        f"{'CREATED':<12} {'MODE':<17} PROVIDER"
-    )
-    print()
+    table_rows = []
     for number, (kind, _, first, second) in enumerate(items, 1):
-        first_mode = "Cascade ingress" if kind == "cascade" else first.get("mode", "Xray")
-        first_values = (
+        first_mode = "Cascade ingress" if kind == "cascade" else node_mode(first)
+        table_rows.append((
+            f"{number}.",
             first.get("host", "N/A"),
             deployment_status((first, second), diagnostics) if kind == "cascade" else status_for_node(first, diagnostics),
             first.get("country", "N/A"),
             date_value(first.get("created_at")),
             first_mode,
             first.get("provider", "N/A"),
-        )
-        print(
-            f"  {number}. {first_values[0]:<15} {first_values[1]:<8} "
-            f"{first_values[2]:<9} {first_values[3]:<12} {first_values[4]:<17} {first_values[5]}"
-        )
+        ))
         if kind == "cascade":
-            second_values = (
+            table_rows.append((
+                "└─",
                 second.get("host", "N/A"),
                 status_for_node(second, diagnostics),
                 second.get("country", "N/A"),
                 date_value(second.get("created_at")),
                 "Cascade egress",
                 second.get("provider", "N/A"),
-            )
-            print(
-                f"  └─ {second_values[0]:<15} {second_values[1]:<8} "
-                f"{second_values[2]:<9} {second_values[3]:<12} {second_values[4]:<17} {second_values[5]}"
-            )
+            ))
+    headers = ("IP", "STATUS", "COUNTRY", "CREATED", "MODE", "PROVIDER")
+    data_rows = [row[1:] for row in table_rows]
+    widths = column_widths(headers, data_rows)
+    print(format_row(headers, widths, indent="   ", gap="   "))
+    for row in table_rows:
+        print(f"{row[0]} {format_row(row[1:], widths, gap='   ')}")
     print()
 
 

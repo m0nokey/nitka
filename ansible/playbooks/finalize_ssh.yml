@@ -1,0 +1,16 @@
+---
+- name: Finalize hardened SSH access
+  hosts: xray_nodes
+  become: true
+  gather_facts: false
+  pre_tasks:
+    - name: Wait for verified deploy SSH access
+      ansible.builtin.wait_for_connection:
+        delay: 1
+        timeout: 30
+        sleep: 2
+  tasks:
+    - name: Run final SSH hardening tasks
+      ansible.builtin.import_role:
+        name: system_base
+        tasks_from: finalize_ssh

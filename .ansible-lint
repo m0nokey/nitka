@@ -1,0 +1,6 @@
+---
+# Nitka intentionally scopes role variables by architectural layer rather than
+# by the filesystem role name: system_base_*, topology_cascade_*,
+# access_*, and backhaul_*. This is the project's public Ansible contract.
+skip_list:
+  - var-naming[no-role-prefix]

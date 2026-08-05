@@ -1,0 +1,19 @@
+---
+- name: Validate Xray REALITY access adapter
+  ansible.builtin.assert:
+    that:
+      - access_xray_transport | default('xray-reality') == 'xray-reality'
+      - access_xray_topology | default('standalone') in ['standalone', 'cascade']
+    fail_msg: >-
+      The Xray REALITY access adapter requires access_xray_transport=xray-reality
+      and supports standalone or cascade topology.
+  changed_when: false
+
+- name: Deploy standalone Xray REALITY endpoint
+  ansible.builtin.include_tasks: standalone.yml
+  when: access_xray_topology | default('standalone') == 'standalone'
+
+- name: Deploy Cascade Xray REALITY endpoint
+  ansible.builtin.include_role:
+    name: topology/cascade/ingress  # noqa role-name[path]
+  when: access_xray_topology | default('standalone') == 'cascade'

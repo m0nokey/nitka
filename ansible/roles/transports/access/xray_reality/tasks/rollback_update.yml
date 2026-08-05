@@ -1,0 +1,3 @@
+---
+- name: Restore the previous Xray REALITY configuration
+  ansible.builtin.include_tasks: main.yml

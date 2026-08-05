@@ -16,8 +16,20 @@ compose_config() {
 }
 
 get_image_of_service() {
-    local svc="$1"
-    compose_config | awk -v svc="$svc" '$0 ~ ("^[[:space:]]*" svc ":") { f=1; next } f && $1=="image:" { print $2; exit }'
+    local svc="$1" line in_service=0
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[[:space:]]{2}${svc}:[[:space:]]*$ ]]; then
+            in_service=1
+            continue
+        fi
+        if ((in_service)) && [[ "$line" =~ ^[[:space:]]{2}[A-Za-z0-9_.-]+:[[:space:]]*$ ]]; then
+            return 1
+        fi
+        if ((in_service)) && [[ "$line" =~ ^[[:space:]]+image:[[:space:]]*(.+)$ ]]; then
+            printf '%s' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done < <(compose_config)
 }
 
 current_ctr_image_id() {
@@ -52,14 +64,13 @@ wait_health() {
 
 prune_repo_unused() {
     local repo="$1" keep_ref="$2"
-    docker images --format '{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}' \
-    | awk -v r="^${repo}:" '$0 ~ r {print}' \
-    | while read -r ref; do
+    while read -r ref; do
+        [[ "$ref" == "${repo}:"* ]] || continue
         [[ "$ref" == "$keep_ref" ]] && continue
         if ! docker ps -aq --filter "ancestor=$ref" | grep -q .; then
             docker rmi -f "$ref" >/dev/null 2>&1 || true
         fi
-    done
+    done < <(docker images --format '{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}')
 }
 
 backup_lines=()
@@ -183,7 +194,6 @@ release_image_ref() {
 }
 
 need_cmd docker
-need_cmd awk
 need_cmd curl
 need_cmd flock
 need_cmd grep

@@ -3,6 +3,9 @@ import unittest
 from scripts.transport_registry import (
     TRANSPORT_SSH_TUN,
     TRANSPORT_XRAY_REALITY,
+    TRANSPORT_OPERATIONS,
+    adapter_lifecycle,
+    get_transport_adapter,
     validate_access_transport,
     validate_deployment_transports,
     validate_transport_plan,
@@ -39,8 +42,8 @@ class TransportRegistryTests(unittest.TestCase):
             ["xray-reality", "ssh-tun", "ssh-tun"],
         )
 
-    def test_legacy_xray_name_is_normalized(self):
-        plan = validate_transport_plan("standalone", "existing-xray")
+    def test_canonical_xray_name_is_preserved(self):
+        plan = validate_transport_plan("standalone", "xray-reality")
 
         self.assertEqual(plan["bindings"][0]["transport"], "xray-reality")
 
@@ -49,7 +52,8 @@ class TransportRegistryTests(unittest.TestCase):
             validate_transport_plan("cascade", "naiveproxy", "ssh-tun")
 
     def test_standalone_access_selection_is_canonicalized(self):
-        self.assertEqual(validate_access_transport("existing-xray"), "xray-reality")
+        self.assertEqual(validate_access_transport("xray-reality"), "xray-reality")
+        self.assertEqual(validate_access_transport("ssh-proxy"), "ssh-proxy")
 
         with self.assertRaisesRegex(ValueError, "not implemented"):
             validate_access_transport("hysteria2")
@@ -60,6 +64,15 @@ class TransportRegistryTests(unittest.TestCase):
                 "topology": "cascade",
                 "transports": {"access": {"transport": "xray-reality"}},
             })
+
+    def test_implemented_adapters_expose_the_same_lifecycle(self):
+        for plane, names in (("access", ("xray-reality", "ssh-proxy")), ("backhaul", ("ssh-tun",))):
+            for name in names:
+                adapter = get_transport_adapter(name, plane)
+                lifecycle = adapter_lifecycle(adapter)
+                self.assertEqual(lifecycle["operations"], TRANSPORT_OPERATIONS)
+                self.assertEqual(lifecycle["deploy_tasks"], "deploy")
+                self.assertEqual(lifecycle["remove_tasks"], "remove")
 
 
 if __name__ == "__main__":

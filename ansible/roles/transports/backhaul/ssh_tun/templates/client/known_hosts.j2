@@ -1,0 +1,1 @@
+[{{ backhaul_ssh_tun_public_host }}]:{{ backhaul_ssh_tun_ssh_port }} {% if backhaul_ssh_tun_host_public_key is defined and backhaul_ssh_tun_host_public_key %}{{ backhaul_ssh_tun_host_public_key | trim }}{% else %}{{ lookup('file', backhaul_ssh_tun_ssh_key_dir ~ '/ssh_host_ed25519_key.pub') | trim }}{% endif %}

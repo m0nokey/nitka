@@ -1,6 +1,0 @@
----
-cascade_ssh_tun_client_tun_mtu: 1200
-cascade_ssh_tun_client_log_level: QUIET
-cascade_ssh_tun_client_ipqos: throughput
-cascade_ssh_tun_network_vpn_client_cidr_ipv4: 10.11.12.2/30
-cascade_ssh_tun_tun_mtu: 1200

@@ -21,6 +21,9 @@ ROUTING_FIELDS = (
     "dns_direct_servers",
 )
 
+CANONICAL_ROUTING_PREFIX = "access_xray_"
+CANONICAL_CLASH_CONCURRENCY_KEY = "topology_cascade_ingress_clash_tcp_concurrent"
+
 
 def _list_value(value, key, *, allow_objects=False):
     if value is None:
@@ -47,19 +50,34 @@ def _unique(values):
     return result
 
 
-def _aggregate(raw, aggregate_key, group_prefix):
+def _aggregate(raw, aggregate_keys, group_prefixes):
     """Resolve a Jinja aggregate while retaining its declared order."""
-    prefixes = (group_prefix,) if isinstance(group_prefix, str) else tuple(group_prefix)
-    value = raw.get(aggregate_key)
-    if isinstance(value, list):
-        return _unique(_list_value(value, aggregate_key))
+    aggregate_keys = (
+        (aggregate_keys,) if isinstance(aggregate_keys, str) else tuple(aggregate_keys)
+    )
+    prefixes = (
+        (group_prefixes,)
+        if isinstance(group_prefixes, str)
+        else tuple(group_prefixes)
+    )
+    for aggregate_key in aggregate_keys:
+        value = raw.get(aggregate_key)
+        if isinstance(value, list):
+            return _unique(_list_value(value, aggregate_key))
 
     names = []
-    if isinstance(value, str):
-        names = [
-            name for name in re.findall(r"ingress_xray_[A-Za-z0-9_]+", value)
-            if any(name.startswith(prefix) for prefix in prefixes)
-        ]
+    for aggregate_key in aggregate_keys:
+        value = raw.get(aggregate_key)
+        if isinstance(value, str):
+            names = [
+                name
+                for name in re.findall(
+                    r"access_xray_[A-Za-z0-9_]+", value
+                )
+                if any(name.startswith(prefix) for prefix in prefixes)
+            ]
+            if names:
+                break
     if not names:
         names = [
             key for key in raw
@@ -71,6 +89,12 @@ def _aggregate(raw, aggregate_key, group_prefix):
     for name in names:
         result.extend(_list_value(raw.get(name), name))
     return _unique(result)
+
+
+def _routing_value(raw, field, *, allow_objects=False):
+    """Read one canonical access_xray routing field."""
+    canonical_key = f"{CANONICAL_ROUTING_PREFIX}{field}"
+    return _list_value(raw.get(canonical_key), canonical_key, allow_objects=allow_objects)
 
 
 def _load_yaml(path):
@@ -103,55 +127,34 @@ def import_routing_policy(state, node_name, path):
     node = state["nodes"][node_name]
     if not isinstance(node, dict):
         raise TypeError(f"node must be an object: {node_name}")
-    xray = node.setdefault("xray", {})
+    xray = node.setdefault("access", {}).setdefault("xray_reality", {})
     if not isinstance(xray, dict):
         raise TypeError(f"node xray state must be an object: {node_name}")
 
     effective = {
-        "block_domains": _list_value(
-            raw.get("ingress_xray_block_domains"), "ingress_xray_block_domains"
-        ),
-        "block_ips": _list_value(
-            raw.get("ingress_xray_block_ips"), "ingress_xray_block_ips"
-        ),
-        "reality_direct_domains": _list_value(
-            raw.get("ingress_xray_reality_direct_domains"),
-            "ingress_xray_reality_direct_domains",
-        ),
-        "reality_direct_ips": _list_value(
-            raw.get("ingress_xray_reality_direct_ips"),
-            "ingress_xray_reality_direct_ips",
-        ),
-        "xhttp_direct_domains": _list_value(
-            raw.get("ingress_xray_xhttp_direct_domains"),
-            "ingress_xray_xhttp_direct_domains",
-        ),
-        "xhttp_direct_ips": _list_value(
-            raw.get("ingress_xray_xhttp_direct_ips"),
-            "ingress_xray_xhttp_direct_ips",
-        ),
+        "block_domains": _routing_value(raw, "block_domains"),
+        "block_ips": _routing_value(raw, "block_ips"),
+        "reality_direct_domains": _routing_value(raw, "reality_direct_domains"),
+        "reality_direct_ips": _routing_value(raw, "reality_direct_ips"),
+        "xhttp_direct_domains": _routing_value(raw, "xhttp_direct_domains"),
+        "xhttp_direct_ips": _routing_value(raw, "xhttp_direct_ips"),
         "reality_proxy_domains": _aggregate(
             raw,
-            "ingress_xray_reality_proxy_domains",
-            "ingress_xray_reality_proxy_domains_",
+            "access_xray_reality_proxy_domains",
+            "access_xray_reality_proxy_domains_",
         ),
         "reality_proxy_ips": _aggregate(
             raw,
-            "ingress_xray_reality_proxy_ips",
-            "ingress_xray_reality_proxy_ips_",
+            "access_xray_reality_proxy_ips",
+            "access_xray_reality_proxy_ips_",
         ),
         "dns_direct_domains": _aggregate(
             raw,
-            "ingress_xray_dns_direct_domains",
-            (
-                "ingress_xray_reality_direct_domains",
-                "ingress_xray_xhttp_direct_domains",
-            ),
+            "access_xray_dns_direct_domains",
+            ("access_xray_reality_direct_domains", "access_xray_xhttp_direct_domains"),
         ),
-        "dns_direct_servers": _list_value(
-            raw.get("ingress_xray_dns_direct_servers"),
-            "ingress_xray_dns_direct_servers",
-            allow_objects=True,
+        "dns_direct_servers": _routing_value(
+            raw, "dns_direct_servers", allow_objects=True
         ),
     }
     effective = {key: _unique(value) for key, value in effective.items()}
@@ -160,17 +163,22 @@ def import_routing_policy(state, node_name, path):
     for key, value in raw.items():
         if not isinstance(value, list):
             continue
-        if key.startswith("ingress_xray_reality_proxy_domains_"):
+        if key.startswith("access_xray_reality_proxy_domains_"):
             categories.setdefault("reality_proxy_domains", {})[
-                key.removeprefix("ingress_xray_reality_proxy_domains_")
+                key.removeprefix("access_xray_reality_proxy_domains_")
             ] = _list_value(value, key)
-        elif key.startswith("ingress_xray_reality_proxy_ips_"):
+        elif key.startswith("access_xray_reality_proxy_ips_"):
             categories.setdefault("reality_proxy_ips", {})[
-                key.removeprefix("ingress_xray_reality_proxy_ips_")
+                key.removeprefix("access_xray_reality_proxy_ips_")
             ] = _list_value(value, key)
 
     xray.update(effective)
-    xray["clash_tcp_concurrent"] = bool(raw.get("ingress_clash_tcp_concurrent", True))
+    xray["clash_tcp_concurrent"] = bool(
+        raw.get(
+            CANONICAL_CLASH_CONCURRENCY_KEY,
+            True,
+        )
+    )
     xray["routing_policy"] = {
         "format": "nitka-routing-v1",
         "source_name": source.name,

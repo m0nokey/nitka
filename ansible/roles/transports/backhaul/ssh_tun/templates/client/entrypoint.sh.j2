@@ -1,0 +1,86 @@
+#!/bin/sh
+set -eu
+
+: "${network_vpn_interface:?}"
+: "${network_vpn_server_ipv4:?}"
+: "${network_vpn_gateway_ipv4:?}"
+: "${network_vpn_client_cidr_ipv4:?}"
+: "${network_vpn_mtu:=1200}"
+
+configure_dns() {
+    cat > /etc/resolv.conf <<RESOLV
+nameserver ${network_vpn_gateway_ipv4}
+options timeout:1 attempts:2 ndots:0
+RESOLV
+}
+
+detect_host_route() {
+    route_fields() {
+        local route="$1" field="$2"
+        set -- $route
+        while [ "$#" -gt 1 ]; do
+            if [ "$1" = "$field" ]; then
+                printf '%s' "$2"
+                return 0
+            fi
+            shift
+        done
+        return 1
+    }
+
+    route_output="$(ip route get "$network_vpn_server_ipv4" 2>/dev/null || true)"
+    network_host_gateway_interface="$(route_fields "$route_output" dev || true)"
+    network_host_gateway_ipv4="$(route_fields "$route_output" via || true)"
+
+    if [ -z "${network_host_gateway_interface:-}" ] || [ -z "${network_host_gateway_ipv4:-}" ]; then
+        while read -r interface state _; do
+            case "$interface" in
+                lo|tun*|docker*|veth*|vir*) continue ;;
+            esac
+            if [ "$state" = UP ]; then
+                network_host_gateway_interface="$interface"
+                break
+            fi
+        done <<EOF
+$(ip -br addr 2>/dev/null || true)
+EOF
+        if [ -n "${network_host_gateway_interface:-}" ]; then
+            while read -r route_prefix _ route_device _; do
+                [ "$route_prefix" = default ] && continue
+                [ "$route_device" = "$network_host_gateway_interface" ] || continue
+                network_host_gateway_ipv4="${route_prefix%%/*}"
+                network_host_gateway_ipv4="${network_host_gateway_ipv4%.*}.1"
+                break
+            done <<EOF
+$(ip route 2>/dev/null || true)
+EOF
+        fi
+    fi
+
+    [ -n "${network_host_gateway_interface:-}" ] && [ -n "${network_host_gateway_ipv4:-}" ]
+}
+
+setup_tun() {
+    detect_host_route || {
+        return 1
+    }
+
+    cleanup_tun
+    ip route replace "$network_vpn_server_ipv4" via "$network_host_gateway_ipv4" dev "$network_host_gateway_interface"
+    ip tuntap add mode tun user root name "$network_vpn_interface" >/dev/null 2>&1 || true
+    ip addr flush dev "$network_vpn_interface" >/dev/null 2>&1 || true
+    ip addr add "$network_vpn_client_cidr_ipv4" peer "$network_vpn_gateway_ipv4" dev "$network_vpn_interface"
+    ip link set dev "$network_vpn_interface" up mtu "$network_vpn_mtu"
+    ip route del default >/dev/null 2>&1 || true
+    ip route add default via "$network_vpn_gateway_ipv4" dev "$network_vpn_interface" metric 50
+    configure_dns
+}
+
+cleanup_tun() {
+    ip route del default >/dev/null 2>&1 || true
+    ip addr flush dev "$network_vpn_interface" >/dev/null 2>&1 || true
+    ip link set dev "$network_vpn_interface" down >/dev/null 2>&1 || true
+}
+
+setup_tun
+exec ssh -N -F /ssh/config proxy

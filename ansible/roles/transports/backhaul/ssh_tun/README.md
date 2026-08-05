@@ -3,7 +3,7 @@
 Status: implemented.
 
 This is the current Cascade backhaul between ingress and egress. Its concrete
-runtime remains in `ansible/roles/cascade_ssh_tun`; this directory documents
+runtime remains in `ansible/roles/transports/backhaul/ssh_tun`; this directory documents
 the adapter boundary and prevents future backhauls from being coupled to the
 Cascade orchestration code.
 

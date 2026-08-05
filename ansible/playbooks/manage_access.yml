@@ -1,0 +1,20 @@
+---
+- name: Manage standalone access transport
+  hosts: xray_nodes
+  become: true
+  gather_facts: false
+  force_handlers: true
+  pre_tasks:
+    - name: Wait for management SSH access
+      ansible.builtin.wait_for_connection:
+        delay: 1
+        timeout: 30
+        sleep: 2
+
+    - name: Gather facts required by the access adapter
+      ansible.builtin.setup:
+
+  roles:
+    - role: transports/access  # noqa role-name[path]
+      vars:
+        access_topology_selection: standalone

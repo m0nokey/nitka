@@ -14,7 +14,17 @@ TOPOLOGY_CASCADE = "cascade"
 PLANE_ACCESS = "access"
 PLANE_BACKHAUL = "backhaul"
 
+TRANSPORT_OPERATIONS = (
+    "deploy",
+    "verify",
+    "restart",
+    "rollback_install",
+    "rollback_update",
+    "remove",
+)
+
 TRANSPORT_XRAY_REALITY = "xray-reality"
+TRANSPORT_SSH_PROXY = "ssh-proxy"
 TRANSPORT_SSH_TUN = "ssh-tun"
 TRANSPORT_NAIVEPROXY = "naiveproxy"
 TRANSPORT_HYSTERIA2 = "hysteria2"
@@ -30,14 +40,26 @@ class TransportAdapter:
     implementation_role: str
     supported_topologies: tuple[str, ...]
     implemented: bool
+    client_service_name: str | None = None
+    server_service_name: str | None = None
+    client_container_name: str | None = None
+    server_container_name: str | None = None
+    lifecycle_operations: tuple[str, ...] = TRANSPORT_OPERATIONS
 
 
 ACCESS_ADAPTERS = {
     TRANSPORT_XRAY_REALITY: TransportAdapter(
         name=TRANSPORT_XRAY_REALITY,
         plane=PLANE_ACCESS,
-        implementation_role="transports/access/xray",
+        implementation_role="transports/access/xray_reality",
         supported_topologies=(TOPOLOGY_STANDALONE, TOPOLOGY_CASCADE),
+        implemented=True,
+    ),
+    TRANSPORT_SSH_PROXY: TransportAdapter(
+        name=TRANSPORT_SSH_PROXY,
+        plane=PLANE_ACCESS,
+        implementation_role="transports/access/ssh_proxy",
+        supported_topologies=(TOPOLOGY_STANDALONE,),
         implemented=True,
     ),
     TRANSPORT_NAIVEPROXY: TransportAdapter(
@@ -63,6 +85,10 @@ BACKHAUL_ADAPTERS = {
         implementation_role="transports/backhaul/ssh_tun",
         supported_topologies=(TOPOLOGY_CASCADE,),
         implemented=True,
+        client_service_name="ssh_tun_client",
+        server_service_name="ssh_tun_server",
+        client_container_name="cascade-ssh-tun-client",
+        server_container_name="cascade-ssh-tun-server",
     ),
     TRANSPORT_NAIVEPROXY: TransportAdapter(
         name=TRANSPORT_NAIVEPROXY,
@@ -87,26 +113,45 @@ BACKHAUL_ADAPTERS = {
     ),
 }
 
-# State written before the modular transport contract used this name for the
-# current Xray access role. Keep it readable while new state uses xray-reality.
-TRANSPORT_ALIASES = {"existing-xray": TRANSPORT_XRAY_REALITY}
-
-
 def canonical_transport(name: str) -> str:
     """Return the canonical transport name or reject an invalid value."""
     if not isinstance(name, str) or not name.strip():
         raise ValueError("transport name must be a non-empty string")
-    return TRANSPORT_ALIASES.get(name.strip().lower(), name.strip().lower())
+    return name.strip().lower()
 
 
 def _select_adapter(name: str, registry: dict[str, TransportAdapter], plane: str):
+    adapter = get_transport_adapter(name, plane, registry)
+    if not adapter.implemented:
+        raise ValueError(f"transport is not implemented: {plane}/{adapter.name}")
+    return adapter
+
+
+def get_transport_adapter(
+    name: str,
+    plane: str,
+    registry: dict[str, TransportAdapter] | None = None,
+) -> TransportAdapter:
+    """Return adapter metadata without requiring the adapter to be deployed."""
+    if registry is None:
+        registry = ACCESS_ADAPTERS if plane == PLANE_ACCESS else BACKHAUL_ADAPTERS
     canonical = canonical_transport(name)
     adapter = registry.get(canonical)
     if adapter is None:
         raise ValueError(f"unsupported {plane} transport: {name}")
-    if not adapter.implemented:
-        raise ValueError(f"transport is not implemented: {plane}/{canonical}")
     return adapter
+
+
+def adapter_lifecycle(adapter: TransportAdapter) -> dict[str, object]:
+    """Return the stable lifecycle contract exposed by an adapter."""
+    return {
+        "operations": adapter.lifecycle_operations,
+        "deploy_tasks": "deploy",
+        "verify_tasks": "verify",
+        "rollback_install_tasks": "rollback_install",
+        "rollback_update_tasks": "rollback_update",
+        "remove_tasks": "remove",
+    }
 
 
 def validate_access_transport(name: str) -> str:

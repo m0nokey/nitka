@@ -1,0 +1,3 @@
+---
+- name: Roll back standalone SSH proxy installation
+  ansible.builtin.include_tasks: remove.yml

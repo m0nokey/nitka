@@ -11,6 +11,10 @@ files.
 to. A deployment can be a standalone Xray node or a logical Cascade made from
 an ingress node and an egress node.
 
+The module boundaries and lifecycle contracts are documented in
+[docs/architecture.md](docs/architecture.md). To add a transport, follow the
+[transport adapter checklist](docs/adding-transport.md).
+
 The program runs on your macOS or Linux computer inside a Docker container.
 Server data, SSH access, and VPN keys are stored only on your computer in a
 local encrypted Vault. They are not sent to a cloud service and are not stored
@@ -210,8 +214,8 @@ After selecting a profile, wait for the deployment to finish.
 
 ### Creating a Cascade
 
-Deploy two ordinary Nitka nodes first. Then open `Add VPN server` and choose
-`Create Cascade VPN`. Select the existing nodes as ingress and egress and
+Open `Add VPN server` and choose `Cascade VPN`. Enter the first VPS as egress
+and the second as ingress, then
 provide a dedicated external transport port for the egress endpoint. The
 transport port must not be the management/bootstrap SSH port `22` (or any
 other management port). The wizard stores the relationship and transport
@@ -368,7 +372,7 @@ the remote exit and transport server to a separate egress node.
 
 A Cascade is one logical VPN service made from two VPS roles:
 
-See the detailed [Cascade topology](ansible/roles/topologies/cascade/README.md)
+See the detailed [Cascade topology](ansible/roles/topology/cascade/README.md)
 reference for the complete transport and blocking flow.
 
 ```text
@@ -414,29 +418,33 @@ hardening:
 ```text
   system_base       Debian, Docker, management SSH, timers, updater, rollback
         |
-  cascade_ingress  Xray, routing policy, client-side transport endpoint
-  cascade_egress   remote DNS, RPZ, server-side transport endpoint
+  topology/cascade/ingress  Xray, routing policy, client-side endpoint
+  topology/cascade/egress   remote DNS, RPZ, server-side endpoint
         |
   transport         client endpoint ↔ server endpoint
 ```
 
-The current transport is SSH TUN:
+The current deployed transport pair is Xray REALITY for client access and SSH
+TUN for the Cascade backhaul:
 
 ```text
 ansible/roles/transports/
   access/
-    xray/       current client-facing access adapter
+    xray_reality/ current client-facing access adapter
   backhaul/
-    ssh_tun/    current ingress-to-egress adapter
+    ssh_tun/      current ingress-to-egress adapter
 ```
 
-The concrete implementation files remain in the existing
-`cascade_ssh_tun`, `cascade_ingress`, and `xray` roles. The `transports/`
-tree is the stable extension boundary; it prevents future transport code from
-being mixed into topology orchestration.
+The concrete implementation files live in the canonical adapter and topology
+roles. `transports/access` and `transports/backhaul` are dispatch boundaries;
+`topology/cascade` owns only the ingress and egress composition. This keeps
+future transport code out of topology orchestration.
 
-Future transports such as Naive or Hysteria2 should implement the same
-transport contract rather than duplicate the surrounding stack:
+Future transports such as NaiveProxy or Hysteria2 should implement the same
+transport contract rather than duplicate the surrounding stack. Client access
+and Cascade backhaul are separate selections: NaiveProxy can be added on the
+client-facing side without coupling it to the backhaul, while Hysteria2 can
+later be added as a backhaul adapter without changing Xray routing or DNS:
 
 1. Define an ingress/client endpoint and an egress/server endpoint.
 2. Keep transport credentials, host keys, and fingerprints in the encrypted
@@ -457,11 +465,11 @@ future implementation:
 - management/bootstrap SSH;
 - systemd updater timers and deployment rollback.
 
-The role `cascade_ssh_tun` is therefore the first concrete backhaul adapter.
+The role `transports/backhaul/ssh_tun` is the first concrete backhaul adapter.
 When additional transports are introduced, they should use a parallel adapter
-under `ansible/roles/transports/access/` or `ansible/roles/transports/backhaul/`,
-selected by deployment state, while preserving the same ingress/egress
-lifecycle and health contract.
+under `ansible/roles/transports/access/` or
+`ansible/roles/transports/backhaul/`, selected by deployment state, while
+preserving the same ingress/egress lifecycle and health contract.
 
 ## Main Menu
 
@@ -481,11 +489,33 @@ to the main menu, and `x` to exit.
 `Add VPN server` opens a second screen:
 
 ```text
-1. Add standalone Xray server
-2. Create Cascade VPN
+1. Standalone VPN
+2. Cascade VPN
 ```
 
-The Cascade wizard selects two already deployed nodes and assigns their roles:
+The standalone wizard then lets you choose the client access transport:
+
+```text
+1. Xray REALITY
+2. SSH proxy
+```
+
+`SSH proxy` is a fast temporary TCP proxy based on OpenSSH for clients such as
+Shadowrocket. It is available for standalone nodes only. Native UDP is not
+supported by OpenSSH. An optional external UDP relay uses UDP-over-TCP and may
+be unstable for calls, games, and realtime audio. The standard SSH proxy
+deployment does not include a UDP relay. The Cascade wizard uses Xray
+REALITY for client access and SSH TUN for the ingress-to-egress backhaul.
+
+SSH proxy capabilities:
+
+```text
+TCP proxy:   supported
+Native UDP:  not supported
+UDP relay:   best effort, UDP-over-TCP
+```
+
+The Cascade wizard selects two VPS nodes and assigns their roles:
 the ingress node receives client connections, and the egress node provides the
 transport exit and remote DNS.
 
@@ -531,7 +561,10 @@ x. exit
 4. Block ads and threats
 5. Block countries
 6. Rotate SSH key
-7. Delete VPN server
+7. Manage routing rules
+8. Update Cascade
+9. Replace VPS node
+10. Delete VPN server
 ```
 
 `Open SSH session` uses the saved management key and port from the Vault.
@@ -539,6 +572,18 @@ For a Cascade, operations that affect the transport or remote DNS are applied
 to the appropriate node: ingress routing changes stay on ingress, while DNS
 protection changes stay on egress. The controller keeps a deployment snapshot
 and restores the last healthy stack if a cutover healthcheck fails.
+
+`Replace VPS node` lets you replace either Cascade role. Replacing egress
+deploys a new egress server, switches the existing ingress to it, verifies the
+Cascade, and updates the Vault only after the replacement is healthy.
+Replacing ingress keeps the existing client access keys and
+routing policy while deploying the ingress replacement. The old node is
+removed from the local Vault after a successful replacement; if it is
+unreachable, delete it separately through the VPS provider.
+
+Replacing a VPS changes its IP address but keeps the selected access and
+backhaul transports. If DPI blocks a transport signature itself, replacing a
+VPS IP is not enough; a separate transport migration is required.
 
 ### VPN Status
 
@@ -884,21 +929,22 @@ separate key database is created on the VPS.
 │   node management, deployment, DNS, security, access keys, and pipelines.
 │
 ├── ansible/
-│   ├── cascade_ingress.yml       # Cascade ingress deployment
-│   ├── cascade_egress.yml        # Cascade egress deployment
-│   ├── site.yml                  # standalone Xray deployment
-│   ├── bootstrap.yml             # initial host access
-│   ├── management_access.yml     # management SSH access
-│   ├── harden_ssh.yml            # SSH hardening with rollback protection
-│   ├── rollback_cascade_*.yml    # remote stack rollback playbooks
+│   ├── playbooks/
+│   │   ├── preflight.yml         # prerequisites and input validation
+│   │   ├── bootstrap.yml         # initial host access
+│   │   ├── harden_ssh.yml        # temporary SSH transition
+│   │   ├── finalize_ssh.yml      # final management SSH cutover
+│   │   ├── deploy_standalone.yml # standalone composition
+│   │   ├── deploy_cascade.yml    # Cascade composition
+│   │   ├── manage_management_ssh.yml
+│   │   ├── remove.yml            # uninstall and restore
+│   │   └── rollback_cascade_*.yml
 │   └── roles/
 │       ├── system_base/          # Debian, Docker, SSH, timers, updates
-│       ├── xray/                 # standalone Xray node
-│       ├── cascade_ingress/      # Cascade Xray/routing stack
-│       ├── cascade_egress/       # Cascade Unbound/RPZ stack
-│       ├── cascade_ssh_tun/      # current transport implementation
-│       ├── transports/            # access/backhaul adapter boundaries
-│       └── topologies/            # standalone/cascade topology boundaries
+│       ├── topology/cascade/      # ingress/egress composition only
+│       └── transports/
+│           ├── access/            # Xray REALITY and SSH proxy adapters
+│           └── backhaul/          # SSH TUN and future backhauls
 │
 ├── examples/
 │   └── cascade/

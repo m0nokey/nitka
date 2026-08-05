@@ -1,0 +1,11 @@
+---
+topology_cascade_ingress_access_dir_name: access/xray-reality
+topology_cascade_ingress_backhaul_dir_name: backhaul/ssh-tun
+topology_cascade_ingress_routing_dir_name: routing/clashrs
+topology_cascade_ingress_clash_tcp_concurrent: true
+topology_cascade_ingress_watchdog_interval_seconds: 5
+topology_cascade_ingress_clash_healthcheck_interval: 5s
+topology_cascade_ingress_clash_healthcheck_timeout: 2s
+topology_cascade_ingress_clash_healthcheck_retries: 2
+topology_cascade_ingress_clash_healthcheck_start_period: 90s
+topology_cascade_ingress_clash_startup_timeout_seconds: 180

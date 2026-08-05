@@ -1,0 +1,31 @@
+---
+- name: Roll back Cascade egress stack
+  hosts: cascade_egress
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restore previous Cascade egress deployment
+      ansible.builtin.shell: |
+        set -eu
+        latest=/var/lib/nitka/backup/cascade-egress.latest
+        if [ -s "$latest" ] && [ -d "$(cat "$latest")" ]; then
+          backup_dir="$(cat "$latest")"
+          failed_dir="{{ topology_cascade_egress_remote_dir }}.failed.$$"
+          docker compose -f "{{ topology_cascade_egress_remote_dir }}/compose.yml" down --remove-orphans >/dev/null 2>&1 || true
+          mv "{{ topology_cascade_egress_remote_dir }}" "$failed_dir"
+          install -d -m 0755 "{{ topology_cascade_egress_remote_dir }}"
+          if ! cp -a "$backup_dir/." "{{ topology_cascade_egress_remote_dir }}/"; then
+            rm -rf "{{ topology_cascade_egress_remote_dir }}"
+            mv "$failed_dir" "{{ topology_cascade_egress_remote_dir }}"
+            exit 1
+          fi
+          rm -rf "$failed_dir"
+          docker compose -f "{{ topology_cascade_egress_remote_dir }}/compose.yml" up -d
+          systemctl enable --now cascade-egress-docker-updater.timer cascade-os-updater.timer
+        else
+          docker compose -f "{{ topology_cascade_egress_remote_dir }}/compose.yml" down --remove-orphans >/dev/null 2>&1 || true
+          systemctl disable --now cascade-egress-docker-updater.timer cascade-egress-docker-updater.service >/dev/null 2>&1 || true
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: true

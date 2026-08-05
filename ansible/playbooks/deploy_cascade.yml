@@ -1,0 +1,5 @@
+---
+# Composition entry point for Cascade.  Each node role remains an independent
+# playbook so ingress, egress, and their transport adapters can be tested alone.
+- ansible.builtin.import_playbook: deploy_cascade_egress.yml  # noqa name[play]
+- ansible.builtin.import_playbook: deploy_cascade_ingress.yml  # noqa name[play]

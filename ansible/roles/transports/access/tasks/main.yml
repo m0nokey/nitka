@@ -2,23 +2,33 @@
 - name: Validate access transport selection
   ansible.builtin.assert:
     that:
-      - access_transport | default('xray-reality') in ['xray-reality', 'existing-xray']
+      - access_transport_selection | default('xray-reality') is match('^[a-z0-9][a-z0-9-]*$')
+      - access_transport_operation | default('deploy') in ['deploy', 'verify', 'restart', 'rollback_install', 'rollback_update', 'remove']
     fail_msg: >-
       Unsupported or unavailable access transport:
-      {{ access_transport | default('undefined') }}.
-      The dispatcher currently implements xray-reality only.
+      {{ access_transport_selection | default('undefined') }}.
+      Transport IDs must use lowercase letters, digits, and hyphens.
   changed_when: false
 
-- name: Normalize access transport alias  # noqa var-naming[no-role-prefix]
+- name: Normalize selected access transport  # noqa var-naming[no-role-prefix]
   ansible.builtin.set_fact:
-    access_selected_transport: >-
-      {{ 'xray-reality' if (access_transport | default('xray-reality')) == 'existing-xray'
-         else (access_transport | default('xray-reality')) }}
+    access_selected_transport: "{{ access_transport_selection | default('xray-reality') }}"
+
+- name: Select access transport role  # noqa var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    access_selected_role: >-
+      {{ {'ssh-proxy': 'ssh_proxy'}.get(
+           access_selected_transport,
+           access_selected_transport | replace('-', '_')
+         ) }}
   changed_when: false
 
-- name: Dispatch Xray REALITY access adapter
+- name: Dispatch selected access adapter
   ansible.builtin.include_role:
-    name: transports/access/xray  # noqa role-name[path]
+    name: "transports/access/{{ access_selected_role }}"  # noqa role-name[path]
+    tasks_from: "{{ access_transport_operation | default('deploy') }}"
   vars:
-    xray_access_transport: "{{ access_selected_transport }}"
-    xray_access_topology: "{{ access_topology | default('standalone') }}"
+    access_xray_transport: "{{ access_selected_transport }}"
+    access_xray_topology: "{{ access_topology_selection | default('standalone') }}"
+    access_xray_operation: "{{ access_transport_operation | default('deploy') }}"
+    access_ssh_proxy_operation: "{{ access_transport_operation | default('deploy') }}"

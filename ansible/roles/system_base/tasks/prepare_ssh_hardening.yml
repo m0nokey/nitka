@@ -1,0 +1,65 @@
+---
+- name: Detect SSH access user primary groups
+  ansible.builtin.command:
+    argv:
+      - id
+      - -gn
+      - "{{ item }}"
+  loop: >-
+    {{ ([system_base_harden_ssh_initial_user] + system_base_harden_ssh_preserve_users)
+       | unique
+       | reject('in', ['root', system_base_deploy_user])
+       | list }}
+  register: system_base_ssh_user_groups
+  changed_when: false
+  failed_when: false
+  loop_control:
+    label: "{{ item }}"
+
+- name: Build SSH AllowGroups
+  ansible.builtin.set_fact:
+    system_base_harden_ssh_allow_groups: >-
+      {{
+        ([system_base_deploy_user] +
+         (system_base_ssh_user_groups.results
+          | selectattr('rc', 'equalto', 0)
+          | map(attribute='stdout')
+          | map('trim')
+          | reject('equalto', '')
+          | list))
+        | unique
+        | join(' ')
+      }}
+
+- name: Detect controller SSH KEX algorithms
+  ansible.builtin.command:
+    cmd: ssh -Q kex
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_connection: local
+    ansible_remote_tmp: /tmp/ansible-local
+  register: system_base_harden_ssh_controller_kex_cmd
+  changed_when: false
+
+- name: Detect VPS SSH KEX algorithms
+  ansible.builtin.command:
+    cmd: ssh -Q kex
+  register: system_base_harden_ssh_vps_kex_cmd
+  changed_when: false
+
+- name: Select shared hardened SSH KEX algorithms
+  ansible.builtin.set_fact:
+    system_base_harden_ssh_kex_algorithms: >-
+      {{
+        system_base_harden_ssh_preferred_kex
+        | select('in', system_base_harden_ssh_vps_kex_cmd.stdout_lines)
+        | select('in', system_base_harden_ssh_controller_kex_cmd.stdout_lines)
+        | join(',')
+      }}
+
+- name: Require shared hardened SSH KEX algorithms
+  ansible.builtin.fail:
+    msg: >-
+      No shared hardened SSH KEX algorithm exists between controller and VPS.
+  when: system_base_harden_ssh_kex_algorithms | length == 0

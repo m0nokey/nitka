@@ -2,17 +2,20 @@
 - name: Validate backhaul transport selection
   ansible.builtin.assert:
     that:
-      - backhaul_transport | default('ssh-tun') == 'ssh-tun'
+      - backhaul_transport_selection | default('ssh-tun') is match('^[a-z0-9][a-z0-9-]*$')
+      - backhaul_transport_operation | default('deploy') in ['deploy', 'verify', 'restart', 'rollback_install', 'rollback_update', 'remove']
     fail_msg: >-
       Unsupported or unavailable backhaul transport:
-      {{ backhaul_transport | default('undefined') }}.
-      The dispatcher currently implements ssh-tun only.
+      {{ backhaul_transport_selection | default('undefined') }}.
+      Transport IDs must use lowercase letters, digits, and hyphens.
     quiet: true
   changed_when: false
 
-- name: Dispatch SSH TUN backhaul adapter
+- name: Dispatch selected backhaul adapter
   ansible.builtin.include_role:
-    name: transports/backhaul/ssh_tun  # noqa role-name[path]
+    name: "transports/backhaul/{{ backhaul_transport_selection | default('ssh-tun') | replace('-', '_') }}"  # noqa role-name[path]
+    tasks_from: "{{ backhaul_transport_operation | default('deploy') }}"
   vars:
-    ssh_tun_transport: "{{ backhaul_transport | default('ssh-tun') }}"
-    ssh_tun_endpoint: "{{ backhaul_endpoint | default('') }}"
+    backhaul_ssh_tun_transport: "{{ backhaul_transport_selection | default('ssh-tun') }}"
+    backhaul_ssh_tun_endpoint: "{{ backhaul_endpoint_selection | default('') }}"
+    backhaul_ssh_tun_operation: "{{ backhaul_transport_operation | default('deploy') }}"

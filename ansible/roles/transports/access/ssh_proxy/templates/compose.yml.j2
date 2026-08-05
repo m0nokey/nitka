@@ -1,0 +1,44 @@
+services:
+  {{ access_ssh_proxy_service_name }}:
+    build:
+      context: .
+    image: {{ access_ssh_proxy_image }}
+    container_name: {{ access_ssh_proxy_container_name }}
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - SYS_CHROOT
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.25
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=8m
+      - /run:rw,nosuid,nodev,noexec,size=8m
+      - /var/ssh:rw,nosuid,nodev,noexec,size=8m
+    ports:
+      - "{{ access_ssh_proxy_external_port }}:{{ access_ssh_proxy_internal_port }}"
+    volumes:
+      - type: bind
+        source: ./authorized_keys
+        target: /etc/ssh/authorized_keys.in
+        read_only: true
+      - type: volume
+        source: {{ access_ssh_proxy_host_key_volume }}
+        target: /etc/ssh/host_keys
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 {{ access_ssh_proxy_internal_port }}"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  {{ access_ssh_proxy_host_key_volume }}:

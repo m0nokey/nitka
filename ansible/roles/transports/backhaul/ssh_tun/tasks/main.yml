@@ -2,53 +2,115 @@
 - name: Validate SSH TUN backhaul adapter selection
   ansible.builtin.assert:
     that:
-      - ssh_tun_transport | default('ssh-tun') == 'ssh-tun'
-      - ssh_tun_endpoint | default('') in ['client', 'server']
+      - backhaul_ssh_tun_transport | default('ssh-tun') == 'ssh-tun'
+      - backhaul_ssh_tun_endpoint | default('') in ['client', 'server']
     fail_msg: >-
-      The SSH TUN adapter requires ssh_tun_transport=ssh-tun and an endpoint
+      The SSH TUN adapter requires backhaul_ssh_tun_transport=ssh-tun and an endpoint
       of client or server.
   changed_when: false
 
+- name: Detect SSH TUN endpoint directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - >-
+      {{ (topology_cascade_ingress_remote_dir if backhaul_ssh_tun_endpoint == 'client'
+          else topology_cascade_egress_remote_dir) }}/{{
+        'ssh_tun_client' if backhaul_ssh_tun_endpoint == 'client' else 'ssh_tun_server' }}
+    - >-
+      {{ (topology_cascade_ingress_remote_dir if backhaul_ssh_tun_endpoint == 'client'
+          else topology_cascade_egress_remote_dir) }}/backhaul/ssh-tun
+  register: backhaul_ssh_tun_migration_source_stats
+  changed_when: false
+
+- name: Reject conflicting SSH TUN endpoint directories
+  ansible.builtin.assert:
+    that:
+      - not (
+          backhaul_ssh_tun_migration_source_stats.results[0].stat.exists | bool
+          and backhaul_ssh_tun_migration_source_stats.results[1].stat.exists | bool
+        )
+    fail_msg: >-
+      Both the SSH TUN migration source and canonical backhaul/ssh-tun directory
+      exist. Clean up the conflict manually before continuing.
+
+- name: Prepare canonical SSH TUN parent directory
+  ansible.builtin.file:
+    path: >-
+      {{ (topology_cascade_ingress_remote_dir if backhaul_ssh_tun_endpoint == 'client'
+          else topology_cascade_egress_remote_dir) }}/backhaul
+    state: directory
+    mode: "0755"
+
+- name: Migrate SSH TUN endpoint directory to canonical path
+  ansible.builtin.command:
+    argv:
+      - mv
+      - >-
+        {{ (topology_cascade_ingress_remote_dir if backhaul_ssh_tun_endpoint == 'client'
+            else topology_cascade_egress_remote_dir) }}/{{
+          'ssh_tun_client' if backhaul_ssh_tun_endpoint == 'client' else 'ssh_tun_server' }}
+      - >-
+        {{ (topology_cascade_ingress_remote_dir if backhaul_ssh_tun_endpoint == 'client'
+            else topology_cascade_egress_remote_dir) }}/backhaul/ssh-tun
+  when: backhaul_ssh_tun_migration_source_stats.results[0].stat.exists | bool
+  changed_when: true
+
 - name: Publish SSH TUN client runtime contract  # noqa var-naming[no-role-prefix]
   ansible.builtin.set_fact:
-    transport_backhaul_service_name: ssh_tun_client
-    transport_backhaul_container_name: cascade-ssh-tun-client
-    transport_backhaul_remote_dir_name: ssh_tun_client
-    transport_backhaul_proxy_host: ssh_tun_client
-    transport_backhaul_proxy_port: "{{ cascade_ingress_clash_port }}"
-    transport_backhaul_dns_address: "{{ cascade_ssh_tun_network_vpn_gateway_ipv4 }}"
-    transport_backhaul_interface: "{{ cascade_ssh_tun_network_interface }}"
-    transport_backhaul_healthcheck_interval: "{{ cascade_ingress_ssh_healthcheck_interval | default('5s') }}"
-    transport_backhaul_healthcheck_timeout: "{{ cascade_ingress_ssh_healthcheck_timeout | default('2s') }}"
-    transport_backhaul_healthcheck_retries: "{{ cascade_ingress_ssh_healthcheck_retries | default(2) }}"
-    transport_backhaul_healthcheck_start_period: "{{ cascade_ingress_ssh_healthcheck_start_period | default('5s') }}"
-    transport_backhaul_startup_timeout: "{{ cascade_ingress_ssh_startup_timeout_seconds | default(180) }}"
-    transport_backhaul_image: local/cascade-ssh-tun-client:latest
-    transport_backhaul_build_context: ssh_tun_client
-  when: ssh_tun_endpoint == 'client'
+    backhaul_ssh_tun_service_name: ssh_tun_client
+    backhaul_ssh_tun_container_name: cascade-ssh-tun-client
+    backhaul_ssh_tun_remote_dir_name: backhaul/ssh-tun
+    backhaul_ssh_tun_remote_dir: "{{ topology_cascade_ingress_remote_dir }}/backhaul/ssh-tun"
+    backhaul_ssh_tun_proxy_host: ssh_tun_client
+    backhaul_ssh_tun_proxy_port: "{{ topology_cascade_ingress_clash_port }}"
+    backhaul_ssh_tun_dns_address: "{{ backhaul_ssh_tun_network_vpn_gateway_ipv4 }}"
+    backhaul_ssh_tun_interface: "{{ backhaul_ssh_tun_network_interface }}"
+    backhaul_ssh_tun_healthcheck_interval: "{{ backhaul_ssh_tun_client_healthcheck_interval }}"
+    backhaul_ssh_tun_healthcheck_timeout: "{{ backhaul_ssh_tun_client_healthcheck_timeout }}"
+    backhaul_ssh_tun_healthcheck_retries: "{{ backhaul_ssh_tun_client_healthcheck_retries }}"
+    backhaul_ssh_tun_healthcheck_start_period: "{{ backhaul_ssh_tun_client_healthcheck_start_period }}"
+    backhaul_ssh_tun_startup_timeout: "{{ backhaul_ssh_tun_client_startup_timeout_seconds }}"
+    backhaul_ssh_tun_image: local/cascade-ssh-tun-client:latest
+    backhaul_ssh_tun_build_context: backhaul/ssh-tun
+  when: backhaul_ssh_tun_endpoint == 'client'
   changed_when: false
 
 - name: Publish SSH TUN server runtime contract  # noqa var-naming[no-role-prefix]
   ansible.builtin.set_fact:
-    transport_backhaul_service_name: ssh_tun_server
-    transport_backhaul_container_name: cascade-ssh-tun-server
-    transport_backhaul_remote_dir_name: ssh_tun_server
-    transport_backhaul_external_port: "{{ cascade_ssh_tun_ssh_port }}"
-    transport_backhaul_internal_port: "{{ cascade_ssh_tun_container_port }}"
-    transport_backhaul_container_ipv4: "{{ cascade_ssh_tun_network_container_vpn_ipv4 }}"
-    transport_backhaul_container_subnet: "{{ cascade_ssh_tun_network_container_subnet_cidr_ipv4 }}"
-    transport_backhaul_container_gateway: "{{ cascade_ssh_tun_network_container_gateway_ipv4 }}"
-    transport_backhaul_healthcheck_interval: 30s
-    transport_backhaul_healthcheck_timeout: 5s
-    transport_backhaul_healthcheck_retries: 3
-    transport_backhaul_healthcheck_start_period: 20s
-    transport_backhaul_image: local/cascade-ssh-tun-server:latest
-    transport_backhaul_build_context: ssh_tun_server
-  when: ssh_tun_endpoint == 'server'
+    backhaul_ssh_tun_service_name: ssh_tun_server
+    backhaul_ssh_tun_container_name: cascade-ssh-tun-server
+    backhaul_ssh_tun_remote_dir_name: backhaul/ssh-tun
+    backhaul_ssh_tun_remote_dir: "{{ topology_cascade_egress_remote_dir }}/backhaul/ssh-tun"
+    backhaul_ssh_tun_external_port: "{{ backhaul_ssh_tun_ssh_port }}"
+    backhaul_ssh_tun_internal_port: "{{ backhaul_ssh_tun_container_port }}"
+    backhaul_ssh_tun_container_ipv4: "{{ backhaul_ssh_tun_network_container_vpn_ipv4 }}"
+    backhaul_ssh_tun_container_subnet: "{{ backhaul_ssh_tun_network_container_subnet_cidr_ipv4 }}"
+    backhaul_ssh_tun_container_gateway: "{{ backhaul_ssh_tun_network_container_gateway_ipv4 }}"
+    backhaul_ssh_tun_healthcheck_interval: 30s
+    backhaul_ssh_tun_healthcheck_timeout: 5s
+    backhaul_ssh_tun_healthcheck_retries: 3
+    backhaul_ssh_tun_healthcheck_start_period: 20s
+    backhaul_ssh_tun_image: local/cascade-ssh-tun-server:latest
+    backhaul_ssh_tun_build_context: backhaul/ssh-tun
+  when: backhaul_ssh_tun_endpoint == 'server'
   changed_when: false
 
 - name: Configure SSH TUN endpoint
-  ansible.builtin.include_role:
-    name: cascade_ssh_tun
+  ansible.builtin.include_tasks:
+    file: keypair.yml
+    apply:
+      # Key material is generated on the controller. The play targets the VPS
+      # with become=true, but the delegated controller tasks must remain unprivileged.
+      become: false
   vars:
-    cascade_ssh_tun_endpoint: "{{ ssh_tun_endpoint }}"
+    ansible_connection: local
+    ansible_remote_tmp: /tmp/ansible-local
+
+- name: Configure SSH TUN client endpoint
+  ansible.builtin.include_tasks: client.yml
+  when: backhaul_ssh_tun_endpoint == 'client'
+
+- name: Configure SSH TUN server endpoint
+  ansible.builtin.include_tasks: server.yml
+  when: backhaul_ssh_tun_endpoint == 'server'

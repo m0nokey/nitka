@@ -1,57 +1,41 @@
 #!/usr/bin/env bash
 
 show_dns_profile_matrix() {
-    local separator
-    separator="    $(printf '%*s' 103 '' | tr ' ' '-')"
+    local -a standard_rows=(
+        $'URLhaus\tON\tON\tON\tON\t~611 entries'
+        $'HaGeZi Threat Intelligence Feeds Mini\t-\tON\t-\t-\t160,610 entries'
+        $'HaGeZi Encrypted DNS\t-\t-\tON\t-\t3,423 entries'
+        $'HaGeZi Encrypted DNS/VPN/Proxy Bypass\t-\t-\t-\tON\t17,591 entries'
+        $'AdGuard CNAME Trackers\t-\t-\tON\tON\t~100,087 entries'
+        $'AdGuard Mail Trackers\t-\t-\tON\tON\t~98,595 entries'
+        $'ThreatFox\t-\t-\tON\tON\t~45,617 entries'
+        $'HaGeZi Pro++\t-\t-\tON\t-\t272,267 entries'
+        $'HaGeZi Ultimate\t-\t-\t-\tON\t294,364 entries'
+        $'HaGeZi Threat Intelligence Feeds Medium\t-\t-\t-\tON\t417,094 entries'
+        $'Threat Intelligence IPs\t-\t-\t-\tON\t~54,609 entries'
+        $'Dynamic DNS Threats\t-\t-\toptional\tON\t1,524 entries'
+        $'Suspicious Spam TLDs\t-\t-\t-\toptional\t~129 entries'
+    )
+    local -a custom_rows=(
+        $'Pop-up Ads\t-\toptional\tincluded\tincluded\t56,598 entries'
+        $'Adult Content\t-\toptional\toptional\toptional\t110,004 entries'
+        $'Gambling Mini\t-\toptional\toptional\toptional\t94,060 entries'
+        $'Gambling Medium\t-\t-\toptional\toptional\t155,276 entries'
+        $'Gambling Full\t-\t-\toptional\toptional\t357,251 entries'
+        $'Social Networks\t-\t-\toptional\toptional\t898 entries'
+        $'SafeSearch\t-\t-\toptional\toptional\t206 entries'
+        $'Anti Piracy\t-\t-\toptional\toptional\t36,844 entries'
+    )
     printf '%s\n' "PROFILE LIST MATRIX"
     printf '%s\n' ""
-    printf '    %-45s %9s %9s %9s %9s %17s\n' \
-        "List" "Minimal" "Optimal" "Full" "Maximum" "Approx. entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "URLhaus" "ON" "ON" "ON" "ON" "~611 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "HaGeZi Threat Intelligence Feeds Mini" "-" "ON" "-" "-" "160,610 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "HaGeZi Encrypted DNS" "-" "-" "ON" "-" "3,423 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "HaGeZi Encrypted DNS/VPN/Proxy Bypass" "-" "-" "-" "ON" "17,591 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "AdGuard CNAME Trackers" "-" "-" "ON" "ON" "~100,087 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "AdGuard Mail Trackers" "-" "-" "ON" "ON" "~98,595 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "ThreatFox" "-" "-" "ON" "ON" "~45,617 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "HaGeZi Pro++" "-" "-" "ON" "-" "272,267 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "HaGeZi Ultimate" "-" "-" "-" "ON" "294,364 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "HaGeZi Threat Intelligence Feeds Medium" "-" "-" "-" "ON" "417,094 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Threat Intelligence IPs" "-" "-" "-" "ON" "~54,609 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Dynamic DNS Threats" "-" "-" "optional" "ON" "1,524 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Suspicious Spam TLDs" "-" "-" "-" "optional" "~129 entries"
-    printf '%s\n' "$separator"
+    ui_print_table "    " "  " 0 \
+        $'List\tMinimal\tOptimal\tFull\tMaximum\tApprox. entries' \
+        "${standard_rows[@]}"
     printf '%s\n' ""
     printf '%s\n' "    Custom-only sources"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Pop-up Ads" "-" "optional" "included" "included" "56,598 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Adult Content" "-" "optional" "optional" "optional" "110,004 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Gambling Mini" "-" "optional" "optional" "optional" "94,060 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Gambling Medium" "-" "-" "optional" "optional" "155,276 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Gambling Full" "-" "-" "optional" "optional" "357,251 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Social Networks" "-" "-" "optional" "optional" "898 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "SafeSearch" "-" "-" "optional" "optional" "206 entries"
-    printf '%s\n' "$separator"
-    printf '    %-45s %9s %9s %9s %9s %17s\n' "Anti Piracy" "-" "-" "optional" "optional" "36,844 entries"
-    printf '%s\n' "$separator"
+    ui_print_table "    " "  " 0 \
+        $'List\tMinimal\tOptimal\tFull\tMaximum\tApprox. entries' \
+        "${custom_rows[@]}"
     printf '%s\n' ""
     printf '%s\n' "    Counts are upstream list values and may change when sources update."
 }
@@ -60,15 +44,11 @@ show_info() {
     local topic="${1:-general}"
     local context="${2:-selected}"
     local reset="$COLOR_RESET" blue="$COLOR_LINE" gray="$COLOR_MUTED"
-    local green=$'\033[92m' yellow=$'\033[93m' red=$'\033[91m'
 
     if [[ ! -t 1 ]]; then
         reset=''
         blue=''
         gray=''
-        green=''
-        yellow=''
-        red=''
     fi
 
     info_desc() {
@@ -80,24 +60,35 @@ show_info() {
     case "$topic" in
         add-node)
             printf '%b  Add VPN server:%b\n' "$blue" "$reset"
-            info_desc "Choose 1. Add VPN server to install Xray VPN on a new VPS."
-            info_desc "The installation creates two VPN connection links:"
-            info_desc "Vision + REALITY and XHTTP + REALITY."
+            info_desc "Choose a topology first: a standalone VPN or a two-node Cascade VPN."
+            info_desc "For a standalone VPN, choose Xray REALITY or the SSH proxy transport."
+            info_desc "Cascade uses Xray REALITY for client access and SSH TUN between its nodes."
+            info_desc "SSH proxy is a fast temporary TCP proxy based on OpenSSH."
+            info_desc "Native UDP is not supported by OpenSSH."
+            info_desc "An optional external UDP relay uses UDP-over-TCP and may be unstable for calls, games, and realtime audio."
             info_desc "Follow the steps shown in the installation pipeline."
             ;;
         status)
+            local -a status_rows=(
+                $'Active\tXray is running and both VPN ports are reachable.'
+                $'Partial\tXray is running and only one VPN port is reachable.'
+                $'VPN unavailable\tThe VPS responded, but Xray is not confirmed running.'
+                $'Unreachable\tNo VPN or management port responded; DPI or a provider firewall may be involved.'
+            )
             printf '%b  Status:%b\n' "$blue" "$reset"
-            printf '    %bActive%b           %bXray is running and both VPN ports are reachable.%b\n' "$green" "$reset" "$gray" "$reset"
-            printf '    %bPartial%b          %bXray is running and only one VPN port is reachable.%b\n' "$yellow" "$reset" "$gray" "$reset"
-            printf '    %bVPN unavailable%b  %bThe VPS responded, but Xray is not confirmed running.%b\n' "$red" "$reset" "$gray" "$reset"
-            printf '    %bUnreachable%b      %bNo VPN or management port responded; DPI or a provider firewall may be involved.%b\n' "$red" "$reset" "$gray" "$reset"
+            ui_print_table "    " "  " 0 $'STATUS\tDESCRIPTION' "${status_rows[@]}"
             if [[ "$context" == selected ]]; then
                 echo
                 printf '%b  Selected server menu:%b\n' "$blue" "$reset"
                 printf '%s\n' "    1. Manage VPN server"
                 info_desc "       Open server operations, ad and threat blocking, country blocking, or deletion."
-                printf '%s\n' "    2. Manage access keys"
-                info_desc "       Show, add, or delete the VPN client keys for this server."
+                if [[ "$context" == ssh_proxy ]]; then
+                    printf '%s\n' "    2. Manage SSH proxy"
+                    info_desc "       Show, add, or delete the SSH proxy usernames and keys."
+                else
+                    printf '%s\n' "    2. Manage access keys"
+                    info_desc "       Show, add, or delete the VPN client keys for this server."
+                fi
             fi
             ;;
         access_keys)
@@ -120,13 +111,63 @@ show_info() {
             info_desc "Delete: select a key number, then confirm with y or cancel with n."
             info_desc "Delete all: confirm that every Vision and XHTTP key should be deleted."
             ;;
+        ssh_proxy)
+            printf '%b  SSH proxy access:%b\n' "$blue" "$reset"
+            info_desc "Each access has its own generated username and Ed25519 private key."
+            info_desc "The username has no shell and can only create dynamic TCP forwarding."
+            info_desc "All access keys use the same SSH proxy port on this VPS."
+            info_desc "The management SSH user and key are separate and are not shown here."
+            echo
+            printf '%b  SSH proxy capabilities:%b\n' "$blue" "$reset"
+            info_desc "TCP proxy: supported."
+            info_desc "Native UDP: not supported."
+            info_desc "UDP relay: best effort, UDP-over-TCP."
+            info_desc "The standard SSH proxy deployment does not include a UDP relay."
+            info_desc "UDP-over-TCP may be unstable for calls, games, and realtime audio."
+            echo
+            printf '%b  Manage SSH proxy menu:%b\n' "$blue" "$reset"
+            printf '%s\n' "    1. Show"
+            info_desc "       Display usernames, private keys, and test commands."
+            printf '%s\n' "    2. Add"
+            info_desc "       Generate 1 to 50 new usernames and Ed25519 key pairs."
+            printf '%s\n' "    3. Delete"
+            info_desc "       Revoke one access key and its username from the proxy."
+            info_desc "       The last remaining proxy access key cannot be deleted."
+            ;;
         dns)
+            local -a blocklist_rows=(
+                $'Minimal\tmalware and malicious websites.'
+                $'Optimal\tmalware, phishing, scams and selected trackers.'
+                $'Full\tads, tracking, telemetry and malware.'
+                $'Maximum\tbroad threat protection and known DNS bypass services.'
+                $'Custom\tchoose extra categories within the VPS resource limit.'
+            )
+            local -a list_description_rows=(
+                $'URLhaus\tmalware delivery and malicious website domains.'
+                $'Threat Intelligence Feeds Mini\tmalware, phishing, scams and attacker infrastructure.'
+                $'Encrypted DNS\tknown DoH and DoT resolver domains.'
+                $'DNS/VPN/Proxy Bypass\tknown DoH, VPN and proxy service domains; not all exit-node IPs.'
+                $'CNAME Trackers\ttrackers hidden behind CNAME DNS records.'
+                $'Mail Trackers\ttracking pixels and link-tracking domains in emails.'
+                $'ThreatFox\tmalware indicators and command-and-control domains.'
+                $'Pro++\tads, trackers, telemetry, malware, phishing and scams.'
+                $'Ultimate\taggressive privacy and security filtering with higher false positives.'
+                $'Threat Intelligence Feeds Medium\ta larger malware, phishing, scam and attacker infrastructure feed.'
+                $'Threat Intelligence IPs\tIP-related threat indicators in RPZ form; not an IP firewall.'
+                $'Dynamic DNS Threats\tsuspicious dynamic DNS used by malware and phishing.'
+                $'Suspicious Spam TLDs\tselected high-abuse TLDs; legitimate sites may be blocked.'
+                $'Pop-up Ads\tknown pop-up and aggressive advertising domains.'
+                $'Adult Content\tadult and NSFW domains; not a complete parental-control system.'
+                $'Gambling Mini\tselected betting, casino and gambling domains.'
+                $'Gambling Medium\ta broader betting, casino and gambling domain list.'
+                $'Gambling Full\tthe broadest betting, casino and gambling domain list.'
+                $'Social Networks\tselected social media domains.'
+                $'SafeSearch\thelps enforce safer search endpoints.'
+                $'Anti Piracy\ttorrent, warez and known piracy domains.'
+                $'Source repository\thttps://github.com/hagezi/dns-blocklists'
+            )
             printf '%b  Block ads and threats:%b\n' "$blue" "$reset"
-            printf '    %-7s - %s\n' "Minimal" "malware and malicious websites."
-            printf '    %-7s - %s\n' "Optimal" "malware, phishing, scams and selected trackers."
-            printf '    %-7s - %s\n' "Full" "ads, tracking, telemetry and malware."
-            printf '    %-7s - %s\n' "Maximum" "broad threat protection and known DNS bypass services."
-            printf '    %-7s - %s\n' "Custom" "choose extra categories within the VPS resource limit."
+            ui_print_table "    " "  -  " 0 "PROFILE\tDESCRIPTION" "${blocklist_rows[@]}"
             info_desc "Full includes Encrypted DNS protection; Custom can disable it for TV compatibility."
             info_desc "Blocked domains return NXDOMAIN. DNS filtering does not replace a firewall."
             info_desc "Resource floors: Minimal/Optimal 1 vCPU and 1280 MB RAM; Full 2 vCPU and 1792 MB RAM."
@@ -150,28 +191,7 @@ show_info() {
             show_dns_profile_matrix
             echo
             printf '%b  List descriptions:%b\n' "$blue" "$reset"
-            printf '    %-32s - %s\n' "URLhaus" "malware delivery and malicious website domains."
-            printf '    %-32s - %s\n' "Threat Intelligence Feeds Mini" "malware, phishing, scams and attacker infrastructure."
-            printf '    %-32s - %s\n' "Encrypted DNS" "known DoH and DoT resolver domains."
-            printf '    %-32s - %s\n' "DNS/VPN/Proxy Bypass" "known DoH, VPN and proxy service domains; not all exit-node IPs."
-            printf '    %-32s - %s\n' "CNAME Trackers" "trackers hidden behind CNAME DNS records."
-            printf '    %-32s - %s\n' "Mail Trackers" "tracking pixels and link-tracking domains in emails."
-            printf '    %-32s - %s\n' "ThreatFox" "malware indicators and command-and-control domains."
-            printf '    %-32s - %s\n' "Pro++" "ads, trackers, telemetry, malware, phishing and scams."
-            printf '    %-32s - %s\n' "Ultimate" "aggressive privacy and security filtering with higher false positives."
-            printf '    %-32s - %s\n' "Threat Intelligence Feeds Medium" "a larger malware, phishing, scam and attacker infrastructure feed."
-            printf '    %-32s - %s\n' "Threat Intelligence IPs" "IP-related threat indicators in RPZ form; not an IP firewall."
-            printf '    %-32s - %s\n' "Dynamic DNS Threats" "suspicious dynamic DNS used by malware and phishing."
-            printf '    %-32s - %s\n' "Suspicious Spam TLDs" "selected high-abuse TLDs; legitimate sites may be blocked."
-            printf '    %-32s - %s\n' "Pop-up Ads" "known pop-up and aggressive advertising domains."
-            printf '    %-32s - %s\n' "Adult Content" "adult and NSFW domains; not a complete parental-control system."
-            printf '    %-32s - %s\n' "Gambling Mini" "selected betting, casino and gambling domains."
-            printf '    %-32s - %s\n' "Gambling Medium" "a broader betting, casino and gambling domain list."
-            printf '    %-32s - %s\n' "Gambling Full" "the broadest betting, casino and gambling domain list."
-            printf '    %-32s - %s\n' "Social Networks" "selected social media domains."
-            printf '    %-32s - %s\n' "SafeSearch" "helps enforce safer search endpoints."
-            printf '    %-32s - %s\n' "Anti Piracy" "torrent, warez and known piracy domains."
-            printf '    %-32s : %s\n' "Source repository" "https://github.com/hagezi/dns-blocklists"
+            ui_print_table "    " "  -  " 0 "LIST\tDESCRIPTION" "${list_description_rows[@]}"
             echo
             printf '%b  Custom selection:%b\n' "$blue" "$reset"
             info_desc "Select a number to toggle a list. [ON] means it will be deployed."
@@ -214,6 +234,32 @@ show_info() {
             printf '%s\n' "    7. Delete VPN server"
             info_desc "       Clean Xray and Docker from the VPS before deleting its Vault entry."
             ;;
+        cascade-server)
+            printf '%b  Manage Cascade VPN server:%b\n' "$blue" "$reset"
+            printf '%s\n' "    1. Check VPN status"
+            info_desc "       Test both VPS nodes, the selected backhaul, and the VPN ports."
+            printf '%s\n' "    2. Open SSH session"
+            info_desc "       Select ingress or egress and connect with its saved management key."
+            printf '%s\n' "    3. Restart VPN server"
+            info_desc "       Restart both Cascade VPN stacks without changing keys or policies."
+            printf '%s\n' "    4. Block ads and threats"
+            info_desc "       Change the DNS protection profile on the egress VPS."
+            printf '%s\n' "    5. Block countries"
+            info_desc "       Apply country blocking rules on the ingress VPS."
+            printf '%s\n' "    6. Rotate SSH key"
+            info_desc "       Generate a new management key for the selected Cascade VPS."
+            printf '%s\n' "    7. Manage routing rules"
+            info_desc "       Import and deploy the Cascade ingress routing policy."
+            printf '%s\n' "    8. Update Cascade"
+            info_desc "       Reapply the current Cascade settings to both VPS nodes."
+            printf '%s\n' "    9. Replace VPS node"
+            info_desc "       Choose ingress or egress, deploy its replacement, verify the Cascade, and then update the Vault."
+            printf '%s\n' "   10. Delete VPN server"
+            info_desc "       Clean both VPS nodes before deleting the Cascade from the Vault."
+            info_desc "The replacement operation changes a VPS IP but keeps the selected access and backhaul transports."
+            info_desc "If DPI blocks a transport signature, use a separate transport migration."
+            info_desc "Access and backhaul transports are independent and can be implemented separately."
+            ;;
         vault)
             printf '%b  Vault:%b\n' "$blue" "$reset"
             info_desc "The Vault is encrypted local storage for VPS access data and VPN keys."
@@ -246,6 +292,13 @@ show_info() {
             info_desc "The server stays in the Vault if remote deletion fails."
             info_desc "After a failed cleanup, choose 1 to retry or 2 to delete only the local Vault entry."
             info_desc "Press b to keep the server in the Vault and return."
+            ;;
+        install-recovery)
+            printf '%b  Incomplete installation:%b\n' "$blue" "$reset"
+            info_desc "Resume uses the same saved SSH key, port, and settings."
+            info_desc "Abort removes the partial installation and restores the original SSH access."
+            info_desc "Start over is only for a VPS that you cleaned manually."
+            info_desc "The main Vault entry is created only after the installation passes all checks."
             ;;
         *)
             printf '%b  Nitka:%b\n' "$blue" "$reset"

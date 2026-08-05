@@ -1,24 +1,24 @@
-ingress_clash_tcp_concurrent: false
-ingress_xray_reality_proxy_domains_first:
+topology_cascade_ingress_clash_tcp_concurrent: false
+access_xray_reality_proxy_domains_first:
   - domain:first.example
-ingress_xray_reality_proxy_domains_second:
+access_xray_reality_proxy_domains_second:
   - keyword:second
-ingress_xray_reality_proxy_domains: >-
-  {{ ingress_xray_reality_proxy_domains_second
-     + ingress_xray_reality_proxy_domains_first }}
-ingress_xray_reality_proxy_ips_first:
+access_xray_reality_proxy_domains: >-
+  {{ access_xray_reality_proxy_domains_second
+     + access_xray_reality_proxy_domains_first }}
+access_xray_reality_proxy_ips_first:
   - 192.0.2.0/24
-ingress_xray_reality_proxy_ips: >-
-  {{ ingress_xray_reality_proxy_ips_first }}
-ingress_xray_reality_direct_domains:
+access_xray_reality_proxy_ips: >-
+  {{ access_xray_reality_proxy_ips_first }}
+access_xray_reality_direct_domains:
   - domain:direct.example
-ingress_xray_xhttp_direct_domains:
+access_xray_xhttp_direct_domains:
   - full:api.direct.example
-ingress_xray_dns_direct_domains: >-
-  {{ ingress_xray_reality_direct_domains
-     + ingress_xray_xhttp_direct_domains }}
-ingress_xray_dns_direct_servers:
+access_xray_dns_direct_domains: >-
+  {{ access_xray_reality_direct_domains
+     + access_xray_xhttp_direct_domains }}
+access_xray_dns_direct_servers:
   - address: https://dns.example/dns-query
-ingress_xray_block_domains:
+access_xray_block_domains:
   - geosite:category-ads-all
-ingress_xray_block_ips: []
+access_xray_block_ips: []

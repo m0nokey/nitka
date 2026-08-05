@@ -1,0 +1,17 @@
+FROM alpine:3.23
+
+RUN apk add --no-cache netcat-openbsd openssh-server shadow \
+    && addgroup -S {{ access_ssh_proxy_group }} \
+{% for access_key in access_ssh_proxy_access_keys %}
+    && adduser -S -D -H -s /sbin/nologin -G {{ access_ssh_proxy_group }} {{ access_key.username }} \
+    && usermod -p '*' {{ access_key.username }} \
+{% endfor %}
+    && true
+
+COPY sshd_config /etc/ssh/sshd_config
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
+RUN chmod 0755 /usr/local/bin/entrypoint.sh \
+    && chmod 0644 /etc/ssh/sshd_config
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -5,6 +5,7 @@ pipeline_start() {
     PIPELINE_ACTIVE=1
     PIPELINE_TITLE="$1"
     PIPELINE_OPERATION="${2:-}"
+    PIPELINE_PLAYBOOK=''
     case "$PIPELINE_OPERATION" in
         preflight) PIPELINE_PERCENT=10; PIPELINE_LABEL='Checking the VPS connection' ;;
         install) PIPELINE_PERCENT=10; PIPELINE_LABEL='Checking the VPS connection' ;;
@@ -31,7 +32,7 @@ pipeline_start() {
 
 pipeline_render() {
     local frames=$'|/-\\' frame
-    ((DEBUG_MODE || !PIPELINE_ACTIVE)) && return 0
+    (( !PIPELINE_ACTIVE )) && return 0
     pipeline_drain_input
     frame="${frames:PIPELINE_FRAME%4:1}"
     if [[ -t 1 ]]; then
@@ -96,11 +97,61 @@ pipeline_stage_from_ansible_log() {
     task_name="$task"
     [[ "$task_name" == *': '* ]] && task_name="${task_name#*: }"
 
+    if [[ "$PIPELINE_OPERATION" == install ]]; then
+        case "$PIPELINE_PLAYBOOK:$task_name" in
+            bootstrap.yml:Wait\ for\ initial\ SSH\ access)
+                pipeline_stage 10 'Checking the VPS connection'; return 0 ;;
+            bootstrap.yml:Gather\ VPS\ facts\ after\ SSH\ is\ available)
+                pipeline_stage 15 'Checking VPS system'; return 0 ;;
+            bootstrap.yml:Bootstrap\ deploy\ access|bootstrap.yml:Require\ deploy\ SSH\ key|bootstrap.yml:Install\ sudo\ for\ bootstrap|bootstrap.yml:Check\ whether\ deploy\ user\ already\ exists|bootstrap.yml:Create\ deploy\ group|bootstrap.yml:Create\ deploy\ user|bootstrap.yml:Install\ deploy\ authorized\ key|bootstrap.yml:Install\ passwordless\ deploy\ sudoers\ file|bootstrap.yml:Verify\ passwordless\ deploy\ sudo)
+                pipeline_stage 25 'Preparing VPS access'; return 0 ;;
+            harden_ssh.yml:Wait\ for\ deploy\ SSH\ access\ after\ bootstrap)
+                pipeline_stage 85 'Preparing final SSH hardening'; return 0 ;;
+            harden_ssh.yml:Gather\ VPS\ facts\ after\ SSH\ is\ available)
+                pipeline_stage 85 'Preparing final SSH hardening'; return 0 ;;
+                harden_ssh.yml:Check\ whether\ *|harden_ssh.yml:Create\ *\ backup\ directory|harden_ssh.yml:Back\ up\ *|harden_ssh.yml:Remove\ old\ SSH\ host\ keys*|harden_ssh.yml:Generate\ SSH\ ed25519\ host\ key|harden_ssh.yml:Mark\ SSH\ host\ key\ initialization\ complete|harden_ssh.yml:Require\ generated\ SSH\ port|harden_ssh.yml:Detect\ *SSH*|harden_ssh.yml:Build\ SSH\ AllowGroups|harden_ssh.yml:Select\ shared\ hardened\ SSH\ KEX\ algorithms|harden_ssh.yml:Check\ current\ sshd_config|harden_ssh.yml:Remove\ obsolete\ Nitka\ SSH\ drop-in)
+                pipeline_stage 85 'Preparing final SSH hardening'; return 0 ;;
+            harden_ssh.yml:Install\ temporary\ SSH\ transition\ configuration|harden_ssh.yml:Reload\ SSH\ daemon\ with\ temporary\ transition\ configuration)
+                pipeline_stage 90 'Applying final SSH hardening'; return 0 ;;
+            harden_ssh.yml:Verify\ effective\ temporary\ SSH\ ports|harden_ssh.yml:Read\ generated\ SSH\ host\ public\ key|harden_ssh.yml:Calculate\ generated\ SSH\ host\ key\ fingerprint|harden_ssh.yml:Report\ generated\ SSH\ host\ key)
+                pipeline_stage 95 'Verifying final SSH access'; return 0 ;;
+            finalize_ssh.yml:Install\ final\ hardened\ sshd_config|finalize_ssh.yml:Reload\ SSH\ daemon\ after\ final\ hardening)
+                pipeline_stage 95 'Applying final SSH hardening'; return 0 ;;
+            finalize_ssh.yml:Verify\ effective\ final\ SSH\ port)
+                pipeline_stage 98 'Verifying final SSH access'; return 0 ;;
+        esac
+    fi
+
+    if [[ "$PIPELINE_OPERATION" == install && "$PIPELINE_PLAYBOOK" == deploy_standalone.yml ]]; then
+        case "$task_name" in
+            Wait\ for\ initial\ SSH\ access|Gather\ VPS\ facts\ after\ SSH\ is\ available)
+                pipeline_stage 60 'Checking SSH access'; return 0 ;;
+            Gather\ package\ facts|Set\ Debian\ codename|Configure\ timezone|Configure\ Debian\ APT\ sources|Update\ APT\ cache\ after\ source\ changes|Install\ base\ packages|Create\ Docker\ APT\ keyrings\ directory|Install\ Docker\ APT\ key|Configure\ Docker\ APT\ source|Configure\ Docker\ APT\ pin|Update\ APT\ cache\ after\ Docker\ source\ changes|Install\ Docker\ and\ Compose\ plugin|Enable\ Docker|Install\ unattended\ upgrade\ packages|Configure\ unattended\ upgrades|Configure\ apt\ periodic\ upgrades|Install\ OS\ updater*|Install\ Docker\ updater*)
+                pipeline_stage 65 'Installing Docker and system packages'; return 0 ;;
+            Validate\ access\ transport\ selection|Normalize\ access\ transport\ alias|Dispatch\ Xray\ REALITY\ access\ adapter|Dispatch\ standalone\ SSH\ access\ adapter|Map\ standalone\ SSH\ transport\ inputs|Validate\ standalone\ SSH\ transport\ input|Validate\ local\ encrypted\ runtime\ state|Select\ DNS\ protection\ profile|Validate\ DNS\ protection\ profile|Select\ local-region\ traffic\ policy|Validate\ local-region\ traffic\ policy|Select\ DNS\ protection\ sources|Validate\ custom\ DNS\ protection\ sources|Validate\ DNS\ protection\ source\ names|Build\ selected\ DNS\ protection\ sources|Calculate\ selected\ DNS\ protection\ entries|Estimate\ DNS\ protection\ memory|Calculate\ DNS\ runtime\ memory|Calculate\ DNS\ protection\ resource\ floor|Validate\ VPS\ resources\ for\ DNS\ protection|Validate\ access\ key\ pairs)
+                pipeline_stage 70 'Preparing selected transport'; return 0 ;;
+            Create\ Xray\ directory|Create\ Unbound\ directories|Render\ Unbound\ configuration|Render\ Unbound\ Dockerfile|Render\ Docker\ Compose\ file|Render\ Xray\ configuration|Create\ standalone\ SSH\ transport\ directory|Render\ standalone\ SSH\ transport\ Dockerfile|Render\ standalone\ SSH\ transport\ entrypoint|Render\ standalone\ SSH\ transport\ sshd\ configuration)
+                pipeline_stage 75 'Rendering VPN/proxy configuration'; return 0 ;;
+            Install\ standalone\ SSH\ transport\ authorized\ key|Render\ standalone\ SSH\ transport\ Compose\ file|Validate\ standalone\ SSH\ transport\ Compose\ file)
+                pipeline_stage 80 'Preparing SSH proxy files'; return 0 ;;
+            Build\ Unbound\ image\ when\ sources\ changed|Build\ standalone\ SSH\ transport\ image|Inspect\ Unbound\ container|Select\ Unbound\ container\ state)
+                pipeline_stage 80 'Preparing runtime validation'; return 0 ;;
+            Validate\ running\ Unbound\ configuration|Validate\ Unbound\ configuration\ in\ disposable\ container|Validate\ standalone\ SSH\ transport\ sshd\ configuration|Validate\ Xray\ configuration*|Validate\ REALITY\ target)
+                pipeline_stage 85 'Validating VPN/proxy configuration'; return 0 ;;
+            Restart\ Unbound\ after\ configuration\ validation|Start\ standalone\ SSH\ transport|Ensure\ Xray\ stack\ is\ running)
+                pipeline_stage 90 'Starting and checking VPN/proxy stack'; return 0 ;;
+        esac
+    fi
+
     case "$PIPELINE_OPERATION:$task_name" in
-        preflight:Wait\ for\ VPS\ SSH\ access|preflight:Gather\ VPS\ facts\ after\ SSH\ is\ available)
-            pipeline_stage 20 'Checking VPS access' ;;
-        preflight:Require\ Debian|preflight:Report\ VPS\ resources)
-            pipeline_stage 80 'Checking VPS resources' ;;
+        preflight:Wait\ for\ VPS\ SSH\ access)
+            pipeline_stage 10 'Checking the VPS connection' ;;
+        preflight:Gather\ VPS\ facts\ after\ SSH\ is\ available)
+            pipeline_stage 40 'Checking VPS system' ;;
+        preflight:Require\ Debian)
+            pipeline_stage 70 'Validating VPS compatibility' ;;
+        preflight:Report\ resource\ facts\ to\ the\ controller)
+            pipeline_stage 90 'Reading VPS resources' ;;
         install:Wait\ for\ initial\ SSH\ access)
             pipeline_stage 10 'Checking the VPS connection' ;;
         install:Gather\ VPS\ facts\ after\ SSH\ is\ available)
@@ -186,11 +237,7 @@ pipeline_default_success_message() {
 
 pipeline_complete() {
     local final_message="${1:-$(pipeline_default_success_message)}" pause="${2:-0}"
-    if ((DEBUG_MODE)); then
-        printf '\n%s\n' "$final_message"
-        ((pause)) && wait_action_return
-        return 0
-    fi
+    ((DEBUG_MODE)) && return 0
     ((PIPELINE_ACTIVE)) || return 0
     if [[ -t 1 ]]; then
         if [[ -n "$PIPELINE_LABEL" && "$PIPELINE_LABEL" != 'Preparing...' ]]; then
@@ -214,13 +261,15 @@ pipeline_complete() {
     PIPELINE_ACTIVE=0
     PIPELINE_TITLE=''
     PIPELINE_OPERATION=''
+    PIPELINE_PLAYBOOK=''
     PIPELINE_LABEL=''
     PIPELINE_FRAME=0
     ((pause)) && wait_action_return
 }
 
 pipeline_abort() {
-    ((DEBUG_MODE || !PIPELINE_ACTIVE)) && return 0
+    ((DEBUG_MODE)) && return 0
+    (( !PIPELINE_ACTIVE )) && return 0
     if [[ -t 1 ]]; then
         printf '\r\033[K  %b[%3d%%]%b %-44s failed\n' \
             "$COLOR_LINE" "$PIPELINE_PERCENT" "$COLOR_RESET" "$PIPELINE_LABEL"
@@ -231,6 +280,7 @@ pipeline_abort() {
     PIPELINE_ACTIVE=0
     PIPELINE_TITLE=''
     PIPELINE_OPERATION=''
+    PIPELINE_PLAYBOOK=''
     PIPELINE_LABEL=''
     PIPELINE_FRAME=0
 }
@@ -242,18 +292,20 @@ pipeline_stage_for_playbook() {
             *.yml) playbook="${argument##*/}" ;;
         esac
     done
+    PIPELINE_PLAYBOOK="$playbook"
     case "$playbook" in
-        bootstrap.yml) pipeline_stage 30 'Preparing VPS access' ;;
-        management_access.yml) pipeline_stage 20 'Checking SSH access' ;;
-        harden_ssh.yml) pipeline_stage 40 'Hardening SSH access' ;;
-        site.yml)
+        bootstrap.yml) pipeline_stage 10 'Checking the VPS connection' ;;
+        manage_management_ssh.yml) pipeline_stage 20 'Checking SSH access' ;;
+        harden_ssh.yml) pipeline_stage 85 'Preparing final SSH hardening' ;;
+        finalize_ssh.yml) pipeline_stage 95 'Applying final SSH hardening' ;;
+        deploy_standalone.yml)
             case "$PIPELINE_OPERATION" in
                 access_keys|dns|countries) pipeline_stage 10 'Checking SSH access' ;;
-                *) pipeline_stage 60 'Installing Docker and system packages' ;;
+                *) pipeline_stage 60 'Checking SSH access' ;;
             esac
             ;;
         restart.yml) pipeline_stage 20 'Checking SSH access' ;;
-        rotate-ssh.yml)
+        rotate_management_ssh.yml)
             [[ "$PIPELINE_OPERATION" == rotate ]] || pipeline_stage 70 'Rotating the SSH key'
             ;;
         remove.yml) pipeline_stage 20 'Checking installed VPN components' ;;
