@@ -6,6 +6,7 @@ access_xray_config_path: "{{ access_xray_dir }}/config.json"
 access_xray_compose_path: "{{ access_xray_dir }}/compose.yml"
 access_xray_container_name: xray
 access_xray_server_name: github.com
+access_xray_country: xx
 access_xray_public_host: "{{ ansible_host | default(inventory_hostname) }}"
 access_xray_xhttp_path: /
 access_xray_unbound_dir: "{{ access_xray_dir }}/unbound"

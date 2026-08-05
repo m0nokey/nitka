@@ -8,6 +8,7 @@ trap 'rm -rf "$RENDER_DIR"' EXIT
 ansible-playbook \
     "$ROOT_DIR/tests/ansible/render_templates.yml" \
     -e "render_dir=$RENDER_DIR" \
+    -e access_xray_country=ru \
     >/dev/null
 
 python3 - "$RENDER_DIR" <<'PY'
@@ -27,6 +28,7 @@ ssh_compose = yaml.safe_load((render_dir / "ssh-compose.yml").read_text(encoding
 ssh_dockerfile = (render_dir / "ssh-Dockerfile").read_text(encoding="utf-8")
 ssh_entrypoint = (render_dir / "ssh-entrypoint.sh").read_text(encoding="utf-8")
 ssh_transition = (render_dir / "ssh-transition.conf").read_text(encoding="utf-8")
+share_links = (render_dir / "share-links.txt").read_text(encoding="utf-8")
 
 assert len(config["inbounds"]) == 2
 assert config["inbounds"][0]["streamSettings"]["network"] == "tcp"
@@ -34,6 +36,8 @@ assert config["inbounds"][1]["streamSettings"]["network"] == "xhttp"
 assert config["inbounds"][1]["streamSettings"]["xhttpSettings"]["mode"] == "packet-up"
 assert config["dns"]["servers"][0]["port"] == 5353
 assert any(rule.get("outboundTag") == "block" for rule in config["routing"]["rules"])
+assert "#nitka-ru-k8m4q2p-vless-reality-vision" in share_links
+assert "#nitka-ru-k8m4q2p-vless-reality-xhttp" in share_links
 
 assert compose["services"]["xray"]["read_only"] is True
 assert compose["services"]["xray"]["cap_drop"] == ["ALL"]

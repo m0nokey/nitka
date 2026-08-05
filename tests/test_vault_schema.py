@@ -97,6 +97,46 @@ class VaultSchemaTests(unittest.TestCase):
         self.assertEqual(node["access"]["ssh_proxy"]["access_keys"][0]["username"], "abc12345")
         self.assertNotIn("private_key", node["access"]["ssh_proxy"])
 
+    def test_legacy_xray_keys_receive_stable_share_ids(self):
+        state = {"nodes": {"node-a": {
+            "xray": {"access_keys": [{
+                "key_id": "key-one",
+                "vision_uuid": "11111111-1111-4111-8111-111111111111",
+                "xhttp_uuid": "22222222-2222-4222-8222-222222222222",
+            }]}
+        }}}
+
+        migrated = migrate_state(state)
+        share_id = migrated["nodes"]["node-a"]["access"]["xray_reality"][
+            "access_keys"
+        ][0]["share_id"]
+        self.assertRegex(share_id, r"^k[a-z0-9]{6}$")
+        self.assertEqual(migrate_state(state), migrated)
+
+    def test_canonical_xray_key_without_share_id_is_rejected_until_migration(self):
+        state = {"nodes": {"node-a": {
+            "access": {"xray_reality": {"access_keys": [{"key_id": "key-one"}]}},
+        }}}
+        migrated = migrate_state(state)
+        sync_canonical_state(migrated)
+        self.assertIn("share_id", migrated["nodes"]["node-a"]["access"]["xray_reality"]["access_keys"][0])
+
+    def test_duplicate_xray_share_ids_are_rejected(self):
+        state = {
+            "vault_schema_version": VAULT_SCHEMA_VERSION,
+            "nodes": {"node-a": {
+                "management": {},
+                "bootstrap": {},
+                "access": {"xray_reality": {"access_keys": [
+                    {"key_id": "one", "share_id": "k8m4q2p"},
+                    {"key_id": "two", "share_id": "k8m4q2p"},
+                ]}},
+                "topology": {},
+            }},
+        }
+        with self.assertRaisesRegex(ValueError, "duplicate share_id"):
+            sync_canonical_state(state)
+
     def test_partial_cascade_gets_the_canonical_transport_plan(self):
         state = {
             "nodes": {},

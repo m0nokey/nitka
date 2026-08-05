@@ -30,6 +30,21 @@ except ImportError:  # pragma: no cover - direct execution through state_cli.py
         validate_transport_plan,
     )
 
+try:
+    from .access_naming import (
+        LINK_TOPOLOGY_CASCADE,
+        LINK_TOPOLOGY_CASCADE_REVERSE,
+        link_name,
+        normalize_country,
+    )
+except ImportError:  # pragma: no cover - direct execution through state_cli.py
+    from access_naming import (
+        LINK_TOPOLOGY_CASCADE,
+        LINK_TOPOLOGY_CASCADE_REVERSE,
+        link_name,
+        normalize_country,
+    )
+
 SCHEMA_VERSION = 1
 TOPOLOGY_CASCADE = "cascade"
 ROLE_INGRESS = "ingress"
@@ -256,7 +271,12 @@ def _preserved_management_users(node):
     return list(dict.fromkeys(user for user in users if user and user != "root"))
 
 
-def cascade_deployment(deployment_id, ingress_node, egress_node):
+def cascade_deployment(
+    deployment_id,
+    ingress_node,
+    egress_node,
+    topology_variant=LINK_TOPOLOGY_CASCADE,
+):
     """Build the first supported cascade definition.
 
     Only the current Xray implementation is enabled today. Backend and
@@ -268,10 +288,13 @@ def cascade_deployment(deployment_id, ingress_node, egress_node):
     _validate_identifier(egress_node, "egress node")
     if ingress_node == egress_node:
         raise ValueError("ingress and egress must be different nodes")
+    if topology_variant not in (LINK_TOPOLOGY_CASCADE, LINK_TOPOLOGY_CASCADE_REVERSE):
+        raise ValueError(f"unsupported cascade topology variant: {topology_variant}")
 
     return {
         "id": deployment_id,
         "topology": TOPOLOGY_CASCADE,
+        "topology_variant": topology_variant,
         "roles": {
             ROLE_INGRESS: {"node": ingress_node},
             ROLE_EGRESS: {"node": egress_node},
@@ -379,6 +402,7 @@ def deployment_transport_summary(state, deployment_id):
     backhaul_adapter = get_transport_adapter(backhaul, PLANE_BACKHAUL)
     return {
         "topology": deployment.get("topology", TOPOLOGY_CASCADE),
+        "topology_variant": deployment.get("topology_variant", LINK_TOPOLOGY_CASCADE),
         "access": {
             "transport": access_adapter.name,
             "implemented": access_adapter.implemented,
@@ -428,6 +452,9 @@ def validate_deployments(state):
             raise TypeError(f"deployment must be an object: {deployment_id}")
         if deployment.get("topology") != TOPOLOGY_CASCADE:
             raise ValueError(f"unsupported deployment topology: {deployment_id}")
+        topology_variant = deployment.get("topology_variant", LINK_TOPOLOGY_CASCADE)
+        if topology_variant not in (LINK_TOPOLOGY_CASCADE, LINK_TOPOLOGY_CASCADE_REVERSE):
+            raise ValueError(f"unsupported cascade topology variant: {deployment_id}")
         roles = deployment.get("roles")
         if not isinstance(roles, dict):
             raise TypeError(f"deployment roles must be an object: {deployment_id}")
@@ -457,6 +484,11 @@ def cascade_ansible_vars(state, deployment_id, local_root):
     deployment = deployments.get(deployment_id)
     if deployment is None:
         raise ValueError(f"deployment not found: {deployment_id}")
+    topology_variant = deployment.get("topology_variant", LINK_TOPOLOGY_CASCADE)
+    if topology_variant != LINK_TOPOLOGY_CASCADE:
+        raise ValueError(
+            f"cascade topology variant is not implemented: {topology_variant}"
+        )
 
     roles = deployment["roles"]
     ingress = state["nodes"][roles[ROLE_INGRESS]["node"]]
@@ -482,7 +514,7 @@ def cascade_ansible_vars(state, deployment_id, local_root):
             raise TypeError(f"ingress Xray access key must be an object: {index}")
         missing.extend(
             f"access_keys[{index}].{field}"
-            for field in ("vision_uuid", "xhttp_uuid")
+            for field in ("share_id", "vision_uuid", "xhttp_uuid")
             if not key.get(field)
         )
     if missing:
@@ -598,6 +630,7 @@ def cascade_ansible_vars(state, deployment_id, local_root):
         "backhaul_ssh_tun_network_vpn_gateway_cidr_ipv4": backhaul_ssh_tun_settings["vpn_gateway_cidr"],
         "backhaul_ssh_tun_network_vpn_client_cidr_ipv4": backhaul_ssh_tun_settings["vpn_client_cidr"],
         "access_xray_public_host": ingress["host"],
+        "access_xray_country": normalize_country(ingress.get("country")),
         "access_xray_xhttp_port": ingress_xray["xhttp_port"],
         "access_xray_reality_port": ingress_xray["vision_port"],
         "access_xray_access_keys": access_keys,
@@ -612,8 +645,18 @@ def cascade_ansible_vars(state, deployment_id, local_root):
         "access_xray_xhttp_port_max": ingress_settings["xray_port_max"],
         "access_xray_reality_port_min": ingress_settings["xray_port_min"],
         "access_xray_reality_port_max": ingress_settings["xray_port_max"],
-        "access_xray_xhttp_remarks": f"{deployment_id}-xhttp",
-        "access_xray_reality_remarks": f"{deployment_id}-vision",
+        "access_xray_xhttp_remarks": link_name(
+            ingress.get("country"),
+            access_key["share_id"],
+            "vless-reality-xhttp",
+            topology_variant,
+        ),
+        "access_xray_reality_remarks": link_name(
+            ingress.get("country"),
+            access_key["share_id"],
+            "vless-reality-vision",
+            topology_variant,
+        ),
         "access_xray_share_link_path": f"{deployment_root}/share-links.txt",
         "topology_cascade_ingress_clash_port": ingress_settings["clash_port"],
         "topology_cascade_ingress_clash_tcp_concurrent": ingress_xray.get(

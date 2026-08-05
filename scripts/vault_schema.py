@@ -9,6 +9,21 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+try:
+    from .access_naming import (
+        LINK_TOPOLOGY_CASCADE,
+        LINK_TOPOLOGY_CASCADE_REVERSE,
+        SHARE_ID_PATTERN,
+        legacy_share_id,
+    )
+except ImportError:  # pragma: no cover - direct execution through state_cli.py
+    from access_naming import (
+        LINK_TOPOLOGY_CASCADE,
+        LINK_TOPOLOGY_CASCADE_REVERSE,
+        SHARE_ID_PATTERN,
+        legacy_share_id,
+    )
+
 VAULT_SCHEMA_VERSION = 2
 
 # These are the only transport selections that existed before deployments
@@ -93,6 +108,7 @@ def migrate_deployment(deployment: dict) -> dict:
         deployment["topology"] = "cascade"
 
     if deployment.get("topology") == "cascade":
+        deployment.setdefault("topology_variant", LINK_TOPOLOGY_CASCADE)
         selected = deployment.get("transports")
         selected = selected if isinstance(selected, dict) else {}
 
@@ -169,6 +185,23 @@ def migrate_node(node: dict) -> dict:
         access["xray_reality"] = _namespace(legacy_access.get("xray"))
     if not isinstance(access.get("ssh_proxy"), dict):
         access["ssh_proxy"] = _namespace(legacy_access.get("ssh_transport"))
+
+    xray_reality = access["xray_reality"]
+    xray_keys = xray_reality.get("access_keys")
+    if isinstance(xray_keys, list):
+        used_share_ids = set()
+        for key in xray_keys:
+            if not isinstance(key, dict):
+                continue
+            share_id = key.get("share_id")
+            if (
+                not isinstance(share_id, str)
+                or not SHARE_ID_PATTERN.fullmatch(share_id)
+                or share_id in used_share_ids
+            ):
+                key["share_id"] = legacy_share_id(key, used_share_ids)
+                share_id = key["share_id"]
+            used_share_ids.add(share_id)
 
     ssh_proxy = access["ssh_proxy"]
     if "access_keys" not in ssh_proxy and isinstance(ssh_proxy.get("keys"), list):
@@ -283,6 +316,9 @@ def assert_canonical_state(state: dict):
             raise TypeError("Vault deployment must be an object")
         if deployment.get("topology") != "cascade":
             raise ValueError("Vault deployment has an unsupported topology")
+        topology_variant = deployment.get("topology_variant", LINK_TOPOLOGY_CASCADE)
+        if topology_variant not in (LINK_TOPOLOGY_CASCADE, LINK_TOPOLOGY_CASCADE_REVERSE):
+            raise ValueError("Vault deployment has an unsupported cascade topology variant")
         roles = deployment.get("roles")
         if not isinstance(roles, dict):
             raise TypeError("Vault deployment roles must be an object")
@@ -332,3 +368,20 @@ def assert_canonical_node(node: dict):
     for namespace in ("management", "bootstrap", "access", "topology"):
         if not isinstance(node.get(namespace), dict):
             raise TypeError(f"Vault v2 node is missing namespace: {namespace}")
+
+    xray_reality = node["access"].get("xray_reality", {})
+    if not isinstance(xray_reality, dict):
+        raise TypeError("Vault v2 access.xray_reality must be an object")
+    access_keys = xray_reality.get("access_keys", [])
+    if not isinstance(access_keys, list):
+        raise TypeError("Vault v2 access.xray_reality.access_keys must be a list")
+    share_ids = set()
+    for key in access_keys:
+        if not isinstance(key, dict):
+            raise TypeError("Vault v2 Xray access key must be an object")
+        share_id = key.get("share_id")
+        if not isinstance(share_id, str) or not SHARE_ID_PATTERN.fullmatch(share_id):
+            raise ValueError("Vault v2 Xray access key is missing a valid share_id")
+        if share_id in share_ids:
+            raise ValueError(f"Vault v2 Xray access keys contain duplicate share_id: {share_id}")
+        share_ids.add(share_id)

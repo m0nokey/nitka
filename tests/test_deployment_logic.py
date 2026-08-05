@@ -38,6 +38,7 @@ class DeploymentLogicTests(unittest.TestCase):
         deployment = cascade_deployment("cascade-1", "ingress-node", "egress-node")
 
         self.assertEqual(deployment["topology"], "cascade")
+        self.assertEqual(deployment["topology_variant"], "cascade")
         self.assertEqual(
             deployment["transports"],
             {
@@ -214,6 +215,20 @@ class DeploymentLogicTests(unittest.TestCase):
             [key["key_id"] for key in variables["access_xray_access_keys"]],
             ["key-one", "key-two"],
         )
+        self.assertEqual(variables["access_xray_country"], "xx")
+        self.assertEqual(
+            variables["access_xray_reality_remarks"],
+            f"nitka-xx-{variables['access_xray_access_keys'][0]['share_id']}-cascade-vless-reality-vision",
+        )
+        self.assertEqual(
+            variables["access_xray_xhttp_remarks"],
+            f"nitka-xx-{variables['access_xray_access_keys'][0]['share_id']}-cascade-vless-reality-xhttp",
+        )
+
+        reverse = copy.deepcopy(state)
+        reverse["deployments"]["cascade-1"]["topology_variant"] = "cascade-reverse"
+        with self.assertRaisesRegex(ValueError, "not implemented"):
+            cascade_ansible_vars(reverse, "cascade-1", "/state/nitka/cascade")
         self.assertEqual(
             variables["backhaul_ssh_tun_public_host"],
             "192.0.2.20",

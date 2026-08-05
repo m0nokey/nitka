@@ -24,6 +24,7 @@ from deployment_logic import (
     replace_cascade_node,
     set_cascade_transports,
 )
+from access_naming import new_share_id
 from nacl.public import PrivateKey
 from routing_policy import import_routing_policy
 from state_logic import build_port_mapping, generated_port, generated_vpn_ports
@@ -305,6 +306,7 @@ elif opts.action == "extract":
         "access_xray_state": xray,
         "access_transport_selection": access_transport,
         "access_xray_server_name": xray.get("server_name", "github.com"),
+        "access_xray_country": node.get("country", "xx"),
         "access_xray_dns_profile": xray.get("dns_filter_profile", "disabled"),
         "access_xray_dns_lists": xray.get("dns_filter_lists", []),
         "access_xray_local_region_countries": xray.get("local_region_countries", []),
@@ -842,6 +844,7 @@ elif opts.action == "add-node":
             "local_region_countries": [],
             "access_keys": [{
                 "key_id": "key-" + vision_uuid.replace("-", "")[:8],
+                "share_id": new_share_id(set()),
                 "vision_uuid": vision_uuid,
                 "xhttp_uuid": str(uuid.uuid4()),
             }],
@@ -980,13 +983,16 @@ elif opts.action in ("add-key", "add-keys", "remove-key", "remove-all-keys"):
             count = int(opts.args[1])
             if not 1 <= count <= 50:
                 raise SystemExit("access key count must be between 1 and 50")
+        share_ids = {key.get("share_id") for key in keys}
         for _ in range(count):
             vision_uuid = str(uuid.uuid4())
             keys.append({
                 "key_id": "key-" + vision_uuid.replace("-", "")[:8],
+                "share_id": new_share_id(share_ids),
                 "vision_uuid": vision_uuid,
                 "xhttp_uuid": str(uuid.uuid4()),
             })
+            share_ids.add(keys[-1]["share_id"])
     elif opts.action == "remove-all-keys":
         xray["access_keys"] = []
     else:

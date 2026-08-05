@@ -187,6 +187,8 @@ class StateCliTests(unittest.TestCase):
         keys = state["nodes"]["node-a"]["access"]["xray_reality"]["access_keys"]
         self.assertEqual(len(keys), 3)
         self.assertEqual(len({key["key_id"] for key in keys}), 3)
+        self.assertEqual(len({key["share_id"] for key in keys}), 3)
+        self.assertTrue(all(re.fullmatch(r"k[a-z0-9]{6}", key["share_id"]) for key in keys))
 
         state = self.run_cli(state, "remove-key", "node-a", keys[1]["key_id"])
         self.assertEqual(len(state["nodes"]["node-a"]["access"]["xray_reality"]["access_keys"]), 2)
@@ -205,6 +207,78 @@ class StateCliTests(unittest.TestCase):
 
         state = self.run_cli(state, "remove-all-keys", "node-a")
         self.assertEqual(state["nodes"]["node-a"]["access"]["xray_reality"]["access_keys"], [])
+
+    def test_rendered_vless_links_use_the_persistent_share_name(self):
+        state = self.fixture_state()
+        node = state["nodes"]["node-a"]
+        node["country"] = "RU"
+        node["access"]["xray_reality"].update({
+            "reality_public_key": "public-key",
+            "reality_short_id": "0123456789abcdef",
+            "server_name": "github.com",
+        })
+        state = migrate_state(state)
+        first = subprocess.run(
+            [sys.executable, str(ROOT_DIR / "scripts/render_keys.py"), "node-a"],
+            cwd=ROOT_DIR,
+            input=json.dumps(state),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        share_id = state["nodes"]["node-a"]["access"]["xray_reality"]["access_keys"][0]["share_id"]
+        self.assertIn(f"#nitka-ru-{share_id}-vless-reality-vision", first.stdout)
+        self.assertIn(f"#nitka-ru-{share_id}-vless-reality-xhttp", first.stdout)
+
+        second = subprocess.run(
+            [sys.executable, str(ROOT_DIR / "scripts/render_keys.py"), "node-a"],
+            cwd=ROOT_DIR,
+            input=json.dumps(state),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(first.stdout, second.stdout)
+
+    def test_cascade_key_screen_includes_cascade_in_link_names(self):
+        state = self.fixture_state()
+        node = state["nodes"]["node-a"]
+        node["country"] = "RU"
+        node["access"]["xray_reality"].update({
+            "reality_public_key": "public-key",
+            "reality_short_id": "0123456789abcdef",
+            "server_name": "github.com",
+        })
+        state["deployments"] = {
+            "cascade-main": {
+                "topology": "cascade",
+                "roles": {
+                    "ingress": {"node": "node-a"},
+                    "egress": {"node": "node-b"},
+                },
+            }
+        }
+        state = migrate_state(state)
+        result = subprocess.run(
+            [sys.executable, str(ROOT_DIR / "scripts/render_keys.py"), "node-a"],
+            cwd=ROOT_DIR,
+            input=json.dumps(state),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        share_id = node["access"]["xray_reality"]["access_keys"][0]["share_id"]
+        self.assertIn(
+            f"#nitka-ru-{share_id}-cascade-vless-reality-vision",
+            result.stdout,
+        )
+        self.assertIn(
+            f"#nitka-ru-{share_id}-cascade-vless-reality-xhttp",
+            result.stdout,
+        )
 
     def test_ssh_proxy_access_keys_have_distinct_users_and_cannot_remove_last(self):
         state = self.fixture_state()

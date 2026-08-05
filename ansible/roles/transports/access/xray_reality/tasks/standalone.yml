@@ -242,6 +242,8 @@
   ansible.builtin.assert:
     that:
       - item.key_id is string
+      - item.share_id is match('^k[a-z0-9]{6}$')
+      - access_xray_state.access_keys | map(attribute='share_id') | list | unique | length == access_xray_state.access_keys | length
       - item.vision_uuid is string
       - item.xhttp_uuid is string
       - item.vision_uuid != item.xhttp_uuid
