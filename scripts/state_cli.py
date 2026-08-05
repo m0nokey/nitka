@@ -14,6 +14,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
+from access_naming import new_share_id
 from deployment_logic import (
     CASCADE_RPZ_PROFILES,
     CASCADE_RPZ_SOURCES,
@@ -24,7 +25,6 @@ from deployment_logic import (
     replace_cascade_node,
     set_cascade_transports,
 )
-from access_naming import new_share_id
 from nacl.public import PrivateKey
 from routing_policy import import_routing_policy
 from state_logic import build_port_mapping, generated_port, generated_vpn_ports

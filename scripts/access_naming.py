@@ -44,7 +44,7 @@ def legacy_share_id(key: dict, existing: set[str]) -> str:
         "legacy-key",
     )
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-    for offset in range(0, len(digest) - 6):
+    for offset in range(len(digest) - 6):
         share_id = "k" + digest[offset : offset + 6]
         if share_id not in existing:
             return share_id
