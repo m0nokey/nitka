@@ -6,5 +6,6 @@ ansible/.ansible-tmp/
 *.pem
 *.crt
 __pycache__/
+.ruff_cache/
 .DS_Store
 .local/legacy-routing/

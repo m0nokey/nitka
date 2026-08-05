@@ -100,7 +100,7 @@ jobs:
         run: bash tests/test_ansible_templates.sh
 
       - name: Run Ruff
-        run: ruff check scripts
+        run: ruff check --no-cache --output-format=full scripts
 
       - name: Run YAML lint
         run: yamllint -d relaxed ansible tests/ansible .github/ci .github/workflows
